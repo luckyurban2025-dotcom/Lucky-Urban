@@ -564,7 +564,7 @@ async function saveCatalogStockEntry(container,p){
 function renderStock(t){
   t.innerHTML=`${pageHead("Stock","O que existe fisicamente neste espaço")}<div class="two-col"><section class="card"><div class="section-head"><h2>Stock atual</h2><span class="spacer"></span><input class="search" id="stockSearch" placeholder="Pesquisar produto, tamanho ou código"></div><div id="stockList"></div></section><section class="card"><div class="section-head"><h2>Adicionar stock</h2></div><div class="grid"><label>Produto<input id="stProduct" placeholder="Ex.: ADIDAS SAMBA"></label><div class="grid grid-2"><label>Tamanho<input id="stSize" placeholder="38 / M"></label><label>Quantidade<input id="stQty" type="number" min="1" value="1"></label></div><label>Preço de compra / unidade (€)<input id="stCost" type="number" min="0" step="0.01" value="0"></label><label>Código de barras<input id="stBarcode" placeholder="Opcional"></label><div class="btn-row"><button class="btn btn-light" id="genBarcode">Gerar código</button><button class="btn" id="saveStock">Guardar</button></div><div id="stockMsg" class="notice" hidden></div></div></section></div>`;
   const search=document.getElementById("stockSearch");
-  const draw=()=>{const q=search.value.trim().toLowerCase();const list=state.stock.filter(x=>Number(x.quantity)>0&&(!q||[x.product_name,x.size,x.barcode].join(" ").toLowerCase().includes(q)));document.getElementById("stockList").innerHTML=list.length?`<div class="stock-grid">${list.map(x=>`<div class="stock-row"><div class="stock-name"><strong>${esc(x.product_name)}</strong><small>${esc(x.size||"Sem tamanho")} ${x.barcode?`· <span class="barcode">${esc(x.barcode)}</span>`:""}</small></div><div class="stock-qty">${int(x.quantity)}</div><div class="stock-cost">${eur(x.unit_cost)}</div><div class="stock-actions"><button class="icon-btn" data-dec="${x.id}">−</button><button class="icon-btn" data-add="${x.id}">+</button><button class="btn btn-light" data-set="${x.id}">Qtd.</button></div></div>`).join("")}</div>`:`<div class="empty">Nenhum stock encontrado.</div>`;document.querySelectorAll("[data-dec]").forEach(b=>b.onclick=()=>changeStock(b.dataset.dec,-1));document.querySelectorAll("[data-add]").forEach(b=>b.onclick=()=>changeStock(b.dataset.add,1));document.querySelectorAll("[data-set]").forEach(b=>b.onclick=()=>setStock(b.dataset.set))};
+  const draw=()=>{const q=search.value.trim().toLowerCase();const list=state.stock.filter(x=>Number(x.quantity)>0&&(!q||[x.product_name,x.size,x.barcode].join(" ").toLowerCase().includes(q)));document.getElementById("stockList").innerHTML=list.length?`<div class="stock-grid">${list.map(x=>`<div class="stock-row"><div class="stock-name"><strong>${esc(x.product_name)}</strong><small>${esc(x.size||"Sem tamanho")} ${x.barcode?`· <span class="barcode">${esc(x.barcode)}</span>`:""}</small></div><div class="stock-qty">${int(x.quantity)}</div><div class="stock-cost">${eur(x.unit_cost)}</div><div class="stock-actions"><button class="icon-btn" data-dec="${x.id}">−</button><button class="icon-btn" data-add="${x.id}">+</button><button class="btn btn-light" data-set="${x.id}">Qtd.</button><button class="btn btn-light" data-edit-stock="${x.id}">Editar</button></div></div>`).join("")}</div>`:`<div class="empty">Nenhum stock encontrado.</div>`;document.querySelectorAll("[data-dec]").forEach(b=>b.onclick=()=>changeStock(b.dataset.dec,-1));document.querySelectorAll("[data-add]").forEach(b=>b.onclick=()=>changeStock(b.dataset.add,1));document.querySelectorAll("[data-set]").forEach(b=>b.onclick=()=>setStock(b.dataset.set));document.querySelectorAll("[data-edit-stock]").forEach(b=>b.onclick=()=>openEditStock(b.dataset.editStock))};
   search.oninput=draw;draw();
   document.getElementById("genBarcode").onclick=()=>{const p=(state.workspace.slug||"").startsWith("verseline")?"VE":"ST";document.getElementById("stBarcode").value=`${p}-${Date.now().toString().slice(-8)}-${Math.random().toString(36).slice(2,5).toUpperCase()}`};
   document.getElementById("saveStock").onclick=async()=>{const msg=document.getElementById("stockMsg");hide(msg);const product_name=document.getElementById("stProduct").value.trim(),size=document.getElementById("stSize").value.trim()||null,quantity=Math.max(1,Number(document.getElementById("stQty").value||1)),unit_cost=Math.max(0,Number(document.getElementById("stCost").value||0)),barcode=document.getElementById("stBarcode").value.trim()||null;if(!product_name)return show(msg,"Escreve o nome do produto.","error");const {data:created,error}=await supabase.from("stock_items").insert({workspace_id:state.workspace.id,product_name,size,quantity,initial_quantity:quantity,unit_cost,origin:"Compra manual",barcode}).select().single();
@@ -572,8 +572,76 @@ function renderStock(t){
     await supabase.from("stock_receipts").insert({workspace_id:state.workspace.id,stock_item_id:created?.id||null,product_name,size,quantity,unit_cost,received_date:today()});
     await loadWorkspaceData();renderStock(t)};
 }
-async function changeStock(id,delta){const item=state.stock.find(x=>x.id===id);if(!item)return;const next=Number(item.quantity)+delta;if(next<0)return;const {error}=await supabase.from("stock_items").update({quantity:next,updated_at:new Date().toISOString()}).eq("id",id).eq("quantity",item.quantity);if(error)return alert("O stock mudou entretanto. Atualiza e tenta novamente.");await loadWorkspaceData();renderShell()}
-async function setStock(id){const item=state.stock.find(x=>x.id===id);if(!item)return;const v=prompt(`Quantidade atual: ${item.quantity}\nNova quantidade:`,String(item.quantity));if(v===null)return;const next=Math.floor(Number(v));if(!Number.isFinite(next)||next<0)return;const {error}=await supabase.from("stock_items").update({quantity:next,updated_at:new Date().toISOString()}).eq("id",id).eq("quantity",item.quantity);if(error)return alert("O stock mudou entretanto. Atualiza e tenta novamente.");await loadWorkspaceData();renderShell()}
+async function saveStockCorrection(item,changes,note){
+  const {data,error}=await supabase.rpc("correct_stock_item",{
+    p_stock_item_id:item.id,
+    p_product_name:changes.product_name,
+    p_size:changes.size||"",
+    p_quantity:Number(changes.quantity),
+    p_unit_cost:Number(changes.unit_cost||0),
+    p_barcode:changes.barcode||"",
+    p_note:note||""
+  });
+  if(error)throw error;
+  return data;
+}
+
+async function changeStock(id,delta){
+  const item=state.stock.find(x=>x.id===id);if(!item)return;
+  const next=Number(item.quantity)+delta;if(next<0)return;
+  try{
+    await saveStockCorrection(item,{...item,quantity:next},delta>0?"Ajuste rápido +1":"Ajuste rápido -1");
+    await loadWorkspaceData();renderShell();
+  }catch(e){alert("Não foi possível corrigir o stock: "+e.message)}
+}
+
+async function setStock(id){
+  const item=state.stock.find(x=>x.id===id);if(!item)return;
+  const v=prompt(`Quantidade atual: ${item.quantity}\nNova quantidade:`,String(item.quantity));
+  if(v===null)return;
+  const next=Math.floor(Number(v));if(!Number.isFinite(next)||next<0)return;
+  try{
+    await saveStockCorrection(item,{...item,quantity:next},"Correção manual de quantidade");
+    await loadWorkspaceData();renderShell();
+  }catch(e){alert("Não foi possível corrigir o stock: "+e.message)}
+}
+
+function openEditStock(id){
+  const item=state.stock.find(x=>x.id===id);if(!item)return;
+  document.body.insertAdjacentHTML("beforeend",`<div class="modal-backdrop" id="editStockModal"><section class="modal">
+    <div class="modal-head"><h2>Editar stock</h2><span class="spacer"></span><button class="icon-btn" id="closeEditStock">×</button></div>
+    <div class="grid">
+      <label>Produto<input id="esProduct" value="${esc(item.product_name)}"></label>
+      <div class="grid grid-2">
+        <label>Tamanho<input id="esSize" value="${esc(item.size||"")}"></label>
+        <label>Quantidade<input id="esQty" type="number" min="0" step="1" value="${Number(item.quantity||0)}"></label>
+      </div>
+      <label>Preço de compra / unidade (€)<input id="esCost" type="number" min="0" step="0.01" value="${Number(item.unit_cost||0)}"></label>
+      <label>Código de barras<input id="esBarcode" value="${esc(item.barcode||"")}"></label>
+      <label>Motivo da correção <span class="muted">(opcional)</span><input id="esNote" placeholder="Ex.: escrevi 10 mas eram 8"></label>
+      ${item.catalog_id?`<div class="notice">Este stock veio de um produto do Catálogo. A correção aqui altera o stock; o código/foto principal continuam em Produtos & Códigos.</div>`:""}
+      <div id="esMsg" class="notice" hidden></div>
+      <button class="btn" id="saveEditStock">Guardar correção</button>
+    </div>
+  </section></div>`);
+  const close=()=>document.getElementById("editStockModal")?.remove();
+  document.getElementById("closeEditStock").onclick=close;
+  document.getElementById("saveEditStock").onclick=async()=>{
+    const msg=document.getElementById("esMsg");hide(msg);
+    const product_name=document.getElementById("esProduct").value.trim();
+    const size=document.getElementById("esSize").value.trim();
+    const quantity=Math.floor(Number(document.getElementById("esQty").value));
+    const unit_cost=Number(document.getElementById("esCost").value||0);
+    const barcode=document.getElementById("esBarcode").value.trim();
+    const note=document.getElementById("esNote").value.trim();
+    if(!product_name||!Number.isFinite(quantity)||quantity<0||unit_cost<0)return show(msg,"Confirma produto, quantidade e custo.","error");
+    try{
+      await saveStockCorrection(item,{product_name,size,quantity,unit_cost,barcode},note||"Edição manual de stock");
+      await loadWorkspaceData();close();renderStock(document.getElementById("page"));
+    }catch(e){show(msg,e.message,"error")}
+  };
+}
+
 
 function orderItemTemplate(i){
   const options=state.stock.filter(s=>Number(s.quantity)>0).map(s=>`<option value="${s.id}">${esc(s.product_name)} · ${esc(s.size||"-")} · ${s.quantity} un.</option>`).join("");
@@ -604,8 +672,186 @@ async function recalcDate(date){const orders=state.orders.filter(o=>o.order_date
 function allowedNext(s){if(s==="Cancelado antes envio")return["Cancelado antes envio","Em trânsito","Entregue"];if(s==="Em trânsito")return["Em trânsito","Entregue","Devolvido"];if(s==="Entregue")return["Entregue","Devolvido"];return["Devolvido"]}
 function renderOrders(t){
   t.innerHTML=`${pageHead("Encomendas","Atualiza o estado quando a entrega mudar",`<button class="btn" id="newOrderBtn">+ Nova encomenda</button>`)}<div class="section-head"><input class="search" id="orderSearch" placeholder="Pesquisar encomenda ou produto"></div><div id="orderList" class="grid"></div>`;document.getElementById("newOrderBtn").onclick=()=>go("new-order");
-  const search=document.getElementById("orderSearch"),draw=()=>{const q=search.value.toLowerCase().trim(),list=state.orders.filter(o=>!q||[o.order_ref,o.channel,o.status,...state.items.filter(i=>i.order_id===o.id).map(i=>i.product_name)].join(" ").toLowerCase().includes(q));document.getElementById("orderList").innerHTML=list.length?list.map(o=>{const items=state.items.filter(i=>i.order_id===o.id);return`<article class="order-card"><div class="order-top"><strong>${esc(o.order_ref)}</strong><span class="badge">${esc(o.channel)}</span><span class="muted">${esc(o.order_date)}</span><span class="spacer"></span><strong class="${Number(o.result)>=0?"good":"bad"}">${eur(o.result)}</strong></div><div class="order-products">${items.map(i=>`<div>${i.quantity}× <strong>${esc(i.product_name)}</strong> · ${esc(i.size||"-")} · ${eur(i.sale_price)}</div>`).join("")}</div><div class="btn-row"><label style="min-width:220px">Estado<select data-order-status="${o.id}" ${o.status==="Devolvido"?"disabled":""}>${allowedNext(o.status).map(s=>`<option ${s===o.status?"selected":""}>${s}</option>`).join("")}</select></label><span class="muted">Receita ${eur(o.revenue)} · Meta ${eur(o.meta_cost)} · Portes ${eur(Number(o.shipping_out)+Number(o.shipping_return))}</span></div></article>`}).join(""):`<div class="card empty">Ainda não tens encomendas.</div>`;document.querySelectorAll("[data-order-status]").forEach(s=>s.onchange=()=>changeOrderStatus(s.dataset.orderStatus,s.value))};search.oninput=draw;draw();
+  const search=document.getElementById("orderSearch"),draw=()=>{const q=search.value.toLowerCase().trim(),list=state.orders.filter(o=>!q||[o.order_ref,o.channel,o.status,...state.items.filter(i=>i.order_id===o.id).map(i=>i.product_name)].join(" ").toLowerCase().includes(q));document.getElementById("orderList").innerHTML=list.length?list.map(o=>{const items=state.items.filter(i=>i.order_id===o.id);return`<article class="order-card"><div class="order-top"><strong>${esc(o.order_ref)}</strong><span class="badge">${esc(o.channel)}</span><span class="muted">${esc(o.order_date)}</span><span class="spacer"></span><strong class="${Number(o.result)>=0?"good":"bad"}">${eur(o.result)}</strong></div><div class="order-products">${items.map(i=>`<div>${i.quantity}× <strong>${esc(i.product_name)}</strong> · ${esc(i.size||"-")} · ${eur(i.sale_price)}</div>`).join("")}</div><div class="btn-row"><button class="btn btn-light" data-edit-order="${o.id}">Editar</button><label style="min-width:220px">Estado<select data-order-status="${o.id}" ${o.status==="Devolvido"?"disabled":""}>${allowedNext(o.status).map(s=>`<option ${s===o.status?"selected":""}>${s}</option>`).join("")}</select></label><span class="muted">Receita ${eur(o.revenue)} · Meta ${eur(o.meta_cost)} · Portes ${eur(Number(o.shipping_out)+Number(o.shipping_return))}</span></div></article>`}).join(""):`<div class="card empty">Ainda não tens encomendas.</div>`;document.querySelectorAll("[data-order-status]").forEach(s=>s.onchange=()=>changeOrderStatus(s.dataset.orderStatus,s.value));document.querySelectorAll("[data-edit-order]").forEach(b=>b.onclick=()=>openEditOrder(b.dataset.editOrder))};search.oninput=draw;draw();
 }
+
+function editStockOptions(selectedId){
+  return state.stock.map(s=>`<option value="${s.id}" ${s.id===selectedId?"selected":""}>${esc(s.product_name)} · ${esc(s.size||"-")} · atual ${Number(s.quantity||0)}</option>`).join("");
+}
+
+function editOrderItemRow(item,index,locked=false){
+  if(locked){
+    return `<div class="order-item edit-order-item" data-edit-item="${index}" data-id="${item.id||""}">
+      <div class="order-item-title"><strong>Produto ${index+1}</strong><span class="badge">Devolvido — produto bloqueado</span></div>
+      <input type="hidden" data-e="source" value="${esc(item.source)}">
+      <input type="hidden" data-e="stockId" value="${esc(item.stock_item_id||"")}">
+      <div class="grid grid-3">
+        <label>Produto<input data-e="product" value="${esc(item.product_name)}" readonly></label>
+        <label>Tamanho<input data-e="size" value="${esc(item.size||"")}" readonly></label>
+        <label>Quantidade<input data-e="qty" type="number" value="${Number(item.quantity)}" readonly></label>
+        <label>Preço venda / unid. (€)<input data-e="sale" type="number" min="0" step="0.01" value="${Number(item.sale_price||0)}"></label>
+        <label>Custo / unid. (€)<input data-e="purchase" type="number" min="0" step="0.01" value="${Number(item.purchase_price||0)}"></label>
+      </div>
+    </div>`;
+  }
+
+  const isStock=item.source==="stock";
+  return `<div class="order-item edit-order-item" data-edit-item="${index}" data-id="${item.id||""}">
+    <div class="order-item-title"><strong>Produto ${index+1}</strong><span class="spacer"></span><button class="btn btn-danger" type="button" data-remove-edit-item>Remover</button></div>
+    <div class="grid grid-3">
+      <label>Origem<select data-e="source"><option value="stock" ${isStock?"selected":""}>Usar stock</option><option value="purchased" ${!isStock?"selected":""}>Comprado / sem stock</option></select></label>
+      <label>Quantidade<input data-e="qty" type="number" min="1" step="1" value="${Number(item.quantity||1)}"></label>
+      <label>Preço venda / unid. (€)<input data-e="sale" type="number" min="0" step="0.01" value="${Number(item.sale_price||0)}"></label>
+    </div>
+    <div class="order-box ${isStock?"":"hidden"}" data-edit-stock-box>
+      <label>Artigo do stock<select data-e="stockId"><option value="">— escolher —</option>${editStockOptions(item.stock_item_id)}</select></label>
+    </div>
+    <div class="order-box ${isStock?"hidden":""}" data-edit-manual-box>
+      <div class="grid grid-3">
+        <label>Produto<input data-e="product" value="${esc(item.product_name||"")}"></label>
+        <label>Tamanho<input data-e="size" value="${esc(item.size||"")}"></label>
+        <label>Custo / unid. (€)<input data-e="purchase" type="number" min="0" step="0.01" value="${Number(item.purchase_price||0)}"></label>
+      </div>
+    </div>
+  </div>`;
+}
+
+function bindEditOrderRows(container){
+  container.querySelectorAll(".edit-order-item").forEach(row=>{
+    const source=row.querySelector('[data-e="source"]');
+    if(source?.tagName==="SELECT"){
+      source.onchange=()=>{
+        const stockBox=row.querySelector("[data-edit-stock-box]");
+        const manualBox=row.querySelector("[data-edit-manual-box]");
+        stockBox?.classList.toggle("hidden",source.value!=="stock");
+        manualBox?.classList.toggle("hidden",source.value==="stock");
+      };
+    }
+    row.querySelector("[data-remove-edit-item]")?.addEventListener("click",()=>{
+      if(container.querySelectorAll(".edit-order-item").length<=1)return alert("A encomenda tem de ter pelo menos um produto.");
+      row.remove();
+      renumberEditItems(container);
+    });
+  });
+}
+
+function renumberEditItems(container){
+  [...container.querySelectorAll(".edit-order-item")].forEach((row,i)=>{
+    row.dataset.editItem=i;
+    const title=row.querySelector(".order-item-title strong");
+    if(title)title.textContent=`Produto ${i+1}`;
+  });
+}
+
+function emptyEditItem(){
+  return {id:"",source:"purchased",stock_item_id:null,product_name:"",size:"",quantity:1,sale_price:0,purchase_price:0};
+}
+
+function readEditOrderItems(container,locked){
+  return [...container.querySelectorAll(".edit-order-item")].map(row=>{
+    const source=row.querySelector('[data-e="source"]').value;
+    const qty=Math.max(1,Math.floor(Number(row.querySelector('[data-e="qty"]').value||1)));
+    const sale_price=Math.max(0,Number(row.querySelector('[data-e="sale"]').value||0));
+    const purchase_price=Math.max(0,Number(row.querySelector('[data-e="purchase"]')?.value||0));
+    const id=row.dataset.id||null;
+
+    if(source==="stock"){
+      const stock_item_id=row.querySelector('[data-e="stockId"]').value||null;
+      const st=state.stock.find(s=>s.id===stock_item_id);
+      const productInput=row.querySelector('[data-e="product"]');
+      const sizeInput=row.querySelector('[data-e="size"]');
+      return {
+        id,source,stock_item_id,
+        product_name:locked?(productInput?.value||""):(st?.product_name||""),
+        size:locked?(sizeInput?.value||""):(st?.size||""),
+        quantity:qty,sale_price,purchase_price:0
+      };
+    }
+    return {
+      id,source,stock_item_id:null,
+      product_name:row.querySelector('[data-e="product"]').value.trim(),
+      size:row.querySelector('[data-e="size"]').value.trim(),
+      quantity:qty,sale_price,purchase_price
+    };
+  });
+}
+
+function openEditOrder(id){
+  const order=state.orders.find(o=>o.id===id);if(!order)return;
+  const items=state.items.filter(i=>i.order_id===id);
+  const locked=order.status==="Devolvido";
+
+  document.body.insertAdjacentHTML("beforeend",`<div class="modal-backdrop" id="editOrderModal"><section class="modal edit-order-modal">
+    <div class="modal-head"><h2>Editar encomenda ${esc(order.order_ref)}</h2><span class="spacer"></span><button class="icon-btn" id="closeEditOrder">×</button></div>
+    <div class="grid grid-2">
+      <label>Nº encomenda / referência<input id="eoRef" value="${esc(order.order_ref)}"></label>
+      <label>Data<input id="eoDate" type="date" value="${esc(order.order_date)}"></label>
+      <label>Canal<select id="eoChannel">${CHANNELS.map(x=>`<option ${x===order.channel?"selected":""}>${x}</option>`).join("")}</select></label>
+      <label>Tipo de portes<select id="eoShipping">${state.shipping.map(x=>`<option ${x.shipping_type===order.shipping_type?"selected":""}>${esc(x.shipping_type)}</option>`).join("")}</select></label>
+    </div>
+    <div class="notice">Estado atual: <strong>${esc(order.status)}</strong>. O Estado continua a ser alterado pelo seletor na lista de encomendas.</div>
+    ${locked?`<div class="notice warn">Esta encomenda já foi devolvida. Para proteger o stock, produto/tamanho/quantidade/origem ficam bloqueados; podes corrigir preços, custos e dados da encomenda.</div>`:""}
+    <hr class="sep">
+    <div id="editOrderItems" class="grid">${items.map((it,i)=>editOrderItemRow(it,i,locked)).join("")}</div>
+    ${!locked?`<button class="btn btn-light" id="addEditItem" type="button" style="margin-top:12px">+ Adicionar produto</button>`:""}
+    <label style="margin-top:14px">Motivo da correção <span class="muted">(opcional)</span><input id="eoNote" placeholder="Ex.: tamanho estava errado"></label>
+    <div id="eoMsg" class="notice" hidden></div>
+    <div class="btn-row" style="margin-top:14px"><button class="btn" id="saveEditOrder">Guardar alterações</button></div>
+  </section></div>`);
+
+  const modal=document.getElementById("editOrderModal");
+  const container=document.getElementById("editOrderItems");
+  const close=()=>modal?.remove();
+  document.getElementById("closeEditOrder").onclick=close;
+  bindEditOrderRows(container);
+
+  document.getElementById("addEditItem")?.addEventListener("click",()=>{
+    if(container.querySelectorAll(".edit-order-item").length>=10)return alert("Máximo de 10 produtos.");
+    container.insertAdjacentHTML("beforeend",editOrderItemRow(emptyEditItem(),container.querySelectorAll(".edit-order-item").length,false));
+    bindEditOrderRows(container);
+  });
+
+  document.getElementById("saveEditOrder").onclick=async()=>{
+    const msg=document.getElementById("eoMsg");hide(msg);
+    const order_ref=document.getElementById("eoRef").value.trim();
+    const order_date=document.getElementById("eoDate").value;
+    const channel=document.getElementById("eoChannel").value;
+    const shipping_type=document.getElementById("eoShipping").value;
+    const note=document.getElementById("eoNote").value.trim();
+    const editedItems=readEditOrderItems(container,locked);
+
+    if(!order_ref||!order_date)return show(msg,"Confirma referência e data.","error");
+    for(const [i,it] of editedItems.entries()){
+      if(!it.product_name)return show(msg,`Falta o produto ${i+1}.`,"error");
+      if(it.source==="stock"&&!it.stock_item_id)return show(msg,`Escolhe o stock do produto ${i+1}.`,"error");
+    }
+
+    try{
+      const oldDate=order.order_date;
+      const {data,error}=await supabase.rpc("edit_order_full",{
+        p_order_id:order.id,
+        p_order_ref:order_ref,
+        p_order_date:order_date,
+        p_channel:channel,
+        p_shipping_type:shipping_type,
+        p_items:editedItems,
+        p_note:note||null
+      });
+      if(error)throw error;
+
+      await loadWorkspaceData();
+      await recalcDate(oldDate);
+      if(order_date!==oldDate)await recalcDate(order_date);
+      await loadWorkspaceData();
+      close();
+      renderOrders(document.getElementById("page"));
+    }catch(e){
+      const text=String(e.message||e);
+      show(msg,text.includes("duplicate")||text.includes("unique")?"Já existe uma encomenda com essa referência.":text,"error");
+    }
+  };
+}
+
 async function changeOrderStatus(id,next){
   const o=state.orders.find(x=>x.id===id);if(!o||o.status===next)return;if(!allowedNext(o.status).includes(next))return alert("Essa mudança não é permitida.");
   const items=state.items.filter(i=>i.order_id===id),old=o.status;

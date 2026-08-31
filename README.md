@@ -34,3 +34,14 @@ index.html, app.js, styles.css, config.js, render.yaml, README.md
 - Entrada rápida por tamanho e quantidade.
 - Regista custo e data de entrada para o dashboard mensal.
 - Também existe entrada manual pelo código se a câmara não funcionar.
+
+
+## v5.1 — Editar encomendas e stock
+- Botão Editar em cada encomenda.
+- Corrige referência, data, canal, portes, produtos, tamanhos, quantidades, preços e custos.
+- Encomendas em trânsito/entregues recalculam o stock com segurança: desfaz o movimento antigo e aplica o novo.
+- Encomendas devolvidas bloqueiam identidade/quantidade/origem para não estragar stock já devolvido.
+- Botão Editar em cada linha de stock.
+- Corrige produto, tamanho, quantidade, custo e código.
+- Ajustes rápidos + / - / Qtd. também ficam registados como correções.
+- Histórico de correções guardado na base de dados.

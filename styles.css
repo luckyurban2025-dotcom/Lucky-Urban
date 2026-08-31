@@ -84,3 +84,11 @@ label{display:grid;gap:6px;color:#444b56;font-size:12px;font-weight:800}input,se
   .catalog-photo{width:28mm;height:28mm}
   .barcode-box{border:0}
 }
+
+.edit-order-modal{width:min(860px,100%)}
+.edit-order-item{position:relative}
+.stock-actions{flex-wrap:wrap}
+@media(max-width:760px){
+  .edit-order-modal .grid-2,.edit-order-modal .grid-3{grid-template-columns:1fr}
+  .stock-actions .btn{padding:8px 9px;font-size:11px}
+}
