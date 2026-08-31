@@ -40,3 +40,9 @@ Para o teu irmão podes clicar `Só Stock` e dar apenas esse módulo.
 `Administração -> Lojas / Espaços -> Alterar logo`
 
 As logos ficam guardadas no Supabase Storage e aparecem nos cartões de login e no menu.
+
+
+## v3.1 CORRIGIDO
+- Corrigidos 3 erros de sintaxe nos modais do Admin.
+- JavaScript validado com `node --check`.
+- Cache-busting adicionado a app.js, config.js e styles.css.
