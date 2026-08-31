@@ -1,52 +1,42 @@
-# Lucky Urban / Verseline — Gestão
+# Lucky Manager v3 — Admin Clean
 
-Aplicação web simples, sem Excel.
+Esta versão substitui a v2.
 
-## O que já está ligado
-- Supabase: projeto `ENCOMENDAS/STOCK`
-- Workspaces separados:
-  - Lucky Urban
-  - Verseline
-- Stock
-- Nova encomenda com 1–10 produtos dinâmicos
-- "Vai usar stock?" SIM/NÃO
-- Encomendas e estados
-- Meta Ads
-- Portes
-- Despesas
-- Dashboard
-- Código de barras interno no stock
+## O que mudou
+- Ecrã inicial com cartões de utilizador.
+- Administrador separado.
+- Admin cria utilizadores sem confirmação de email.
+- Permissões reais por utilizador.
+- Utilizador pode ter só Stock, ou qualquer combinação de módulos.
+- Lucky Urban, Verseline e futuros espaços ficam separados.
+- Admin pode trocar de espaço no menu.
+- Admin pode criar novas lojas/espaços.
+- Cada espaço pode ter a sua logo.
+- Stock rápido com `-`, `+` e alteração direta da quantidade.
+- Nova encomenda continua dinâmica: escolhes 1–10 produtos e só aparecem esses produtos.
+- Em cada produto: usar stock SIM/NÃO.
 
-## Como pôr online no Render
+## Atualizar o GitHub
+No repositório `Lucky-Urban`, substitui os ficheiros atuais por estes:
+- index.html
+- app.js
+- styles.css
+- config.js
+- render.yaml
 
-1. Cria um repositório no GitHub.
-2. Envia TODOS estes ficheiros para a raiz do repositório:
-   - `index.html`
-   - `styles.css`
-   - `config.js`
-   - `app.js`
-   - `render.yaml`
-3. No Render:
-   - New + → Static Site
-   - liga o repositório
-   - Publish directory: `.`
-   - não é preciso comando de build
-4. Faz Deploy.
+Podes também enviar este README.md.
 
-`config.js` usa apenas a chave **publishable** do Supabase. Essa chave foi criada para ser usada no frontend; a segurança real é feita pelas regras RLS da base de dados.
+Depois faz `Commit changes`. O Render, se estiver ligado ao repositório, faz o deploy automaticamente.
 
 ## Primeiro acesso
-No site:
-1. escolhe Lucky Urban ou Verseline;
-2. cria um utilizador com email e palavra-passe;
-3. se receberes confirmação por email, confirma;
-4. inicia sessão;
-5. introduz o código privado de ativação daquele workspace.
+No ecrã inicial escolhe `Administrador` e entra com o email/password do utilizador administrador que já foi criado.
 
-Não publiques os códigos privados de ativação no GitHub.
+Depois:
+`Administração -> Utilizadores -> + Criar utilizador`
 
-## Nota sobre stock
-- "SIM — escolher do stock": escolhes diretamente um artigo físico que já existe no stock.
-- "NÃO — comprado/sem stock": escreves manualmente produto, tamanho, preço de venda e custo.
-- Se um artigo comprado para a encomenda for devolvido, entra no stock.
-- Se um artigo que saiu do stock for devolvido, volta ao stock.
+Para o teu irmão podes clicar `Só Stock` e dar apenas esse módulo.
+
+## Logos
+`Administração -> Lojas / Espaços -> Alterar logo`
+
+As logos ficam guardadas no Supabase Storage e aparecem nos cartões de login e no menu.
