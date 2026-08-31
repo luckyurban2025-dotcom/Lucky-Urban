@@ -1,0 +1,6 @@
+services:
+  - type: web
+    name: lucky-urban-manager
+    runtime: static
+    buildCommand: echo "No build required"
+    staticPublishPath: .
