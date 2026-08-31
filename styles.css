@@ -25,3 +25,16 @@ label{display:grid;gap:6px;color:#444b56;font-size:12px;font-weight:800}input,se
   .admin-only-shell{grid-template-columns:1fr}
   .admin-only-shell .sidebar{display:flex;position:relative;height:auto}
 }
+
+.month-toolbar{display:flex;align-items:center;gap:10px;margin-bottom:16px;padding:12px 14px}
+.month-title{display:grid;gap:2px;min-width:155px}
+.month-title span{font-size:11px;color:var(--muted)}
+.month-title strong{text-transform:capitalize;font-size:16px}
+.month-toolbar input[type="month"]{width:165px;min-height:40px}
+.month-arrow{min-width:44px;padding-left:10px;padding-right:10px}
+.dashboard-counts{margin-bottom:0}
+@media(max-width:760px){
+  .month-toolbar{flex-wrap:wrap}
+  .month-title{flex:1;min-width:145px}
+  .month-toolbar input[type="month"]{order:5;width:100%}
+}

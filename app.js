@@ -7,7 +7,7 @@ const LABEL=Object.fromEntries(MODULES);
 const CHANNELS=["Shopify","Instagram","Facebook","WhatsApp","Vinted"];
 const STATUSES=["Em trânsito","Entregue","Devolvido","Cancelado antes envio"];
 const EXPENSE_TYPES=["Shopify","Apps","Embalagens","Domínio","Material","Outro"];
-const state={session:null,access:null,directory:[],workspaces:[],workspace:null,page:"dashboard",stock:[],orders:[],items:[],shipping:[],meta:[],expenses:[],adminUsers:[]};
+const state={session:null,access:null,directory:[],workspaces:[],workspace:null,page:"dashboard",stock:[],orders:[],items:[],shipping:[],meta:[],expenses:[],adminUsers:[],dashboardMonth:new Date().toISOString().slice(0,7)};
 const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"}[c]));
 const eur=n=>new Intl.NumberFormat("pt-PT",{style:"currency",currency:"EUR"}).format(Number(n||0));
 const int=n=>new Intl.NumberFormat("pt-PT",{maximumFractionDigits:0}).format(Number(n||0));
@@ -133,8 +133,18 @@ function renderPage(){
   renderShell();
 }
 
+function monthLabel(key){
+  const [y,m]=String(key||today().slice(0,7)).split("-").map(Number);
+  return new Intl.DateTimeFormat("pt-PT",{month:"long",year:"numeric"}).format(new Date(y,m-1,1));
+}
+function shiftDashboardMonth(delta){
+  const [y,m]=state.dashboardMonth.split("-").map(Number);
+  const d=new Date(y,m-1+delta,1);
+  state.dashboardMonth=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;
+  renderDashboard(document.getElementById("page"));
+}
 function renderDashboard(t){
-  const month=today().slice(0,7);
+  const month=state.dashboardMonth||today().slice(0,7);
   const orders=state.orders.filter(x=>String(x.order_date).startsWith(month));
   const revenue=orders.reduce((a,x)=>a+Number(x.revenue||0),0);
   const orderResult=orders.reduce((a,x)=>a+Number(x.result||0),0);
@@ -143,9 +153,99 @@ function renderDashboard(t){
   const stockPurchases=state.stock.filter(x=>x.origin==="Compra manual"&&String(x.created_at).startsWith(month)).reduce((a,x)=>a+Number(x.initial_quantity||0)*Number(x.unit_cost||0),0);
   const real=orderResult-expenses-stockPurchases;
   const units=state.stock.reduce((a,x)=>a+Math.max(0,Number(x.quantity||0)),0);
-  t.innerHTML=`${pageHead("Início",`Resumo de ${state.workspace.name}`)}<div class="stats"><div class="stat"><div class="stat-label">Receita</div><div class="stat-value">${eur(revenue)}</div></div><div class="stat"><div class="stat-label">Resultado real</div><div class="stat-value ${real>=0?"good":"bad"}">${eur(real)}</div><div class="stat-note">despesas e compras de stock incluídas</div></div><div class="stat"><div class="stat-label">Stock em casa</div><div class="stat-value">${int(units)}</div><div class="stat-note">unidades disponíveis</div></div><div class="stat"><div class="stat-label">Meta Ads</div><div class="stat-value">${eur(meta)}</div></div></div><div class="two-col"><section class="card"><div class="section-head"><h2>Últimas encomendas</h2><span class="spacer"></span>${can("orders")?`<button class="btn btn-light" id="allOrders">Ver todas</button>`:""}</div>${state.orders.length?`<div class="grid">${state.orders.slice(0,5).map(o=>`<div class="order-card"><div class="order-top"><strong>${esc(o.order_ref)}</strong><span class="badge">${esc(o.status)}</span><span class="spacer"></span><strong>${eur(o.revenue)}</strong></div><div class="muted">${esc(o.order_date)} · ${esc(o.channel)}</div></div>`).join("")}</div>`:`<div class="empty">Ainda não tens encomendas.</div>`}</section><section class="card"><div class="section-head"><h2>Ações rápidas</h2></div><div class="grid">${can("new-order")?`<button class="btn" id="quickOrder">+ Nova encomenda</button>`:""}${can("stock")?`<button class="btn btn-light" id="quickStock">Abrir stock</button>`:""}${isAdmin()?`<button class="btn btn-light" id="quickUsers">Gerir utilizadores</button>`:""}</div></section></div>`;
-  document.getElementById("allOrders")?.addEventListener("click",()=>go("orders"));document.getElementById("quickOrder")?.addEventListener("click",()=>go("new-order"));document.getElementById("quickStock")?.addEventListener("click",()=>go("stock"));document.getElementById("quickUsers")?.addEventListener("click",()=>go("admin-users"));
+  const delivered=orders.filter(x=>x.status==="Entregue").length;
+  const returned=orders.filter(x=>x.status==="Devolvido").length;
+  const monthOrders=[...orders].sort((a,b)=>String(b.order_date).localeCompare(String(a.order_date))).slice(0,5);
+  const label=monthLabel(month);
+
+  t.innerHTML=`
+    ${pageHead("Início",`Resumo de ${state.workspace.name}`)}
+
+    <div class="month-toolbar card">
+      <button class="btn btn-light month-arrow" id="prevMonth">←</button>
+      <div class="month-title">
+        <span>Mês a analisar</span>
+        <strong>${esc(label)}</strong>
+      </div>
+      <input id="dashboardMonth" type="month" value="${esc(month)}">
+      <button class="btn btn-light month-arrow" id="nextMonth">→</button>
+      <button class="btn btn-soft" id="thisMonth">Mês atual</button>
+    </div>
+
+    <div class="stats">
+      <div class="stat">
+        <div class="stat-label">Receita</div>
+        <div class="stat-value">${eur(revenue)}</div>
+        <div class="stat-note">${esc(label)}</div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">Resultado real</div>
+        <div class="stat-value ${real>=0?"good":"bad"}">${eur(real)}</div>
+        <div class="stat-note">despesas e compras de stock incluídas</div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">Stock em casa</div>
+        <div class="stat-value">${int(units)}</div>
+        <div class="stat-note">stock atual, não histórico</div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">Meta Ads</div>
+        <div class="stat-value">${eur(meta)}</div>
+        <div class="stat-note">${esc(label)}</div>
+      </div>
+    </div>
+
+    <div class="grid grid-3 dashboard-counts">
+      <div class="soft-card"><div class="stat-label">Encomendas</div><div class="stat-value">${orders.length}</div></div>
+      <div class="soft-card"><div class="stat-label">Entregues</div><div class="stat-value good">${delivered}</div></div>
+      <div class="soft-card"><div class="stat-label">Devolvidas</div><div class="stat-value bad">${returned}</div></div>
+    </div>
+
+    <div class="two-col" style="margin-top:16px">
+      <section class="card">
+        <div class="section-head">
+          <h2>Encomendas de ${esc(label)}</h2>
+          <span class="spacer"></span>
+          ${can("orders")?`<button class="btn btn-light" id="allOrders">Ver todas</button>`:""}
+        </div>
+        ${monthOrders.length?`<div class="grid">${monthOrders.map(o=>`
+          <div class="order-card">
+            <div class="order-top">
+              <strong>${esc(o.order_ref)}</strong>
+              <span class="badge">${esc(o.status)}</span>
+              <span class="spacer"></span>
+              <strong>${eur(o.revenue)}</strong>
+            </div>
+            <div class="muted">${esc(o.order_date)} · ${esc(o.channel)}</div>
+          </div>`).join("")}</div>`:`<div class="empty">Não existem encomendas neste mês.</div>`}
+      </section>
+
+      <section class="card">
+        <div class="section-head"><h2>Ações rápidas</h2></div>
+        <div class="grid">
+          ${can("new-order")?`<button class="btn" id="quickOrder">+ Nova encomenda</button>`:""}
+          ${can("stock")?`<button class="btn btn-light" id="quickStock">Abrir stock</button>`:""}
+        </div>
+      </section>
+    </div>`;
+
+  document.getElementById("prevMonth").onclick=()=>shiftDashboardMonth(-1);
+  document.getElementById("nextMonth").onclick=()=>shiftDashboardMonth(1);
+  document.getElementById("dashboardMonth").onchange=e=>{
+    if(e.target.value){
+      state.dashboardMonth=e.target.value;
+      renderDashboard(document.getElementById("page"));
+    }
+  };
+  document.getElementById("thisMonth").onclick=()=>{
+    state.dashboardMonth=today().slice(0,7);
+    renderDashboard(document.getElementById("page"));
+  };
+  document.getElementById("allOrders")?.addEventListener("click",()=>go("orders"));
+  document.getElementById("quickOrder")?.addEventListener("click",()=>go("new-order"));
+  document.getElementById("quickStock")?.addEventListener("click",()=>go("stock"));
 }
+
 function renderStock(t){
   t.innerHTML=`${pageHead("Stock","O que existe fisicamente neste espaço")}<div class="two-col"><section class="card"><div class="section-head"><h2>Stock atual</h2><span class="spacer"></span><input class="search" id="stockSearch" placeholder="Pesquisar produto, tamanho ou código"></div><div id="stockList"></div></section><section class="card"><div class="section-head"><h2>Adicionar stock</h2></div><div class="grid"><label>Produto<input id="stProduct" placeholder="Ex.: ADIDAS SAMBA"></label><div class="grid grid-2"><label>Tamanho<input id="stSize" placeholder="38 / M"></label><label>Quantidade<input id="stQty" type="number" min="1" value="1"></label></div><label>Preço de compra / unidade (€)<input id="stCost" type="number" min="0" step="0.01" value="0"></label><label>Código de barras<input id="stBarcode" placeholder="Opcional"></label><div class="btn-row"><button class="btn btn-light" id="genBarcode">Gerar código</button><button class="btn" id="saveStock">Guardar</button></div><div id="stockMsg" class="notice" hidden></div></div></section></div>`;
   const search=document.getElementById("stockSearch");
