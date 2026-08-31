@@ -7,7 +7,7 @@ const LABEL=Object.fromEntries(MODULES);
 const CHANNELS=["Shopify","Instagram","Facebook","WhatsApp","Vinted"];
 const STATUSES=["Em trânsito","Entregue","Devolvido","Cancelado antes envio"];
 const EXPENSE_TYPES=["Shopify","Apps","Embalagens","Domínio","Material","Outro"];
-const state={session:null,access:null,directory:[],workspaces:[],workspace:null,page:"dashboard",stock:[],orders:[],items:[],shipping:[],meta:[],expenses:[],adminUsers:[],dashboardMonth:new Date().toISOString().slice(0,7)};
+const state={session:null,access:null,directory:[],workspaces:[],workspace:null,page:"dashboard",stock:[],orders:[],items:[],shipping:[],meta:[],expenses:[],catalog:[],receipts:[],adminUsers:[],dashboardMonth:new Date().toISOString().slice(0,7),scanner:null};
 const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"}[c]));
 const eur=n=>new Intl.NumberFormat("pt-PT",{style:"currency",currency:"EUR"}).format(Number(n||0));
 const int=n=>new Intl.NumberFormat("pt-PT",{maximumFractionDigits:0}).format(Number(n||0));
@@ -82,16 +82,27 @@ async function logout(){await supabase.auth.signOut();state.session=null;state.a
 
 async function loadWorkspaceData(){
   const id=state.workspace.id;
-  const [s,o,i,p,m,e]=await Promise.all([
+  const [s,o,i,p,m,e,c,r]=await Promise.all([
     supabase.from("stock_items").select("*").eq("workspace_id",id).order("created_at",{ascending:false}),
     supabase.from("orders").select("*").eq("workspace_id",id).order("order_date",{ascending:false}).order("created_at",{ascending:false}),
     supabase.from("order_items").select("*").eq("workspace_id",id).order("created_at"),
     supabase.from("shipping_rates").select("*").eq("workspace_id",id).order("created_at"),
     supabase.from("meta_ads").select("*").eq("workspace_id",id).order("spend_date",{ascending:false}),
-    supabase.from("expenses").select("*").eq("workspace_id",id).order("expense_date",{ascending:false})]);
-  state.stock=s.data||[];state.orders=o.data||[];state.items=i.data||[];state.shipping=p.data||[];state.meta=m.data||[];state.expenses=e.data||[];
+    supabase.from("expenses").select("*").eq("workspace_id",id).order("expense_date",{ascending:false}),
+    supabase.from("product_catalog").select("*").eq("workspace_id",id).order("created_at",{ascending:false}),
+    supabase.from("stock_receipts").select("*").eq("workspace_id",id).order("received_date",{ascending:false}).order("created_at",{ascending:false})
+  ]);
+  state.stock=s.data||[];state.orders=o.data||[];state.items=i.data||[];state.shipping=p.data||[];state.meta=m.data||[];state.expenses=e.data||[];state.catalog=c.data||[];state.receipts=r.data||[];
 }
-function navItems(){const mods=availableModules();return MODULES.filter(([id])=>mods.includes(id))}
+function navItems(){
+  const mods=availableModules();
+  const base=MODULES.filter(([id])=>mods.includes(id));
+  const stockIndex=base.findIndex(([id])=>id==="stock");
+  const catalogItem=["catalog","Produtos & Códigos"];
+  if(stockIndex>=0)base.splice(stockIndex+1,0,catalogItem);
+  else base.push(catalogItem);
+  return base;
+}
 function renderShell(){
   if(isAdmin()){
     app.innerHTML=`<div class="app-shell admin-only-shell"><aside class="sidebar">
@@ -124,6 +135,7 @@ function renderPage(){
   if(isAdmin()){state.page="admin-users";return renderAdminUsers(t)}
   if(state.page==="dashboard")return renderDashboard(t);
   if(state.page==="stock")return renderStock(t);
+  if(state.page==="catalog")return renderCatalog(t);
   if(state.page==="new-order")return renderNewOrder(t);
   if(state.page==="orders")return renderOrders(t);
   if(state.page==="meta")return renderMeta(t);
@@ -150,7 +162,9 @@ function renderDashboard(t){
   const orderResult=orders.reduce((a,x)=>a+Number(x.result||0),0);
   const meta=state.meta.filter(x=>String(x.spend_date).startsWith(month)).reduce((a,x)=>a+Number(x.amount||0),0);
   const expenses=state.expenses.filter(x=>String(x.expense_date).startsWith(month)).reduce((a,x)=>a+Number(x.amount||0),0);
-  const stockPurchases=state.stock.filter(x=>x.origin==="Compra manual"&&String(x.created_at).startsWith(month)).reduce((a,x)=>a+Number(x.initial_quantity||0)*Number(x.unit_cost||0),0);
+  const receiptPurchases=state.receipts.filter(x=>String(x.received_date).startsWith(month)).reduce((a,x)=>a+Number(x.quantity||0)*Number(x.unit_cost||0),0);
+  const legacyStockPurchases=state.stock.filter(x=>x.origin==="Compra manual"&&!x.catalog_id&&String(x.created_at).startsWith(month)).reduce((a,x)=>a+Number(x.initial_quantity||0)*Number(x.unit_cost||0),0);
+  const stockPurchases=receiptPurchases+legacyStockPurchases;
   const real=orderResult-expenses-stockPurchases;
   const units=state.stock.reduce((a,x)=>a+Math.max(0,Number(x.quantity||0)),0);
   const delivered=orders.filter(x=>x.status==="Entregue").length;
@@ -246,13 +260,317 @@ function renderDashboard(t){
   document.getElementById("quickStock")?.addEventListener("click",()=>go("stock"));
 }
 
+
+function catalogFullName(p){
+  return [p.brand,p.product_name,p.variant].filter(Boolean).join(" · ");
+}
+function generateCatalogBarcode(){
+  const prefix=(state.workspace?.slug||"CAT").replace(/[^a-z0-9]/gi,"").slice(0,5).toUpperCase()||"CAT";
+  return `${prefix}-${Date.now().toString().slice(-9)}-${Math.random().toString(36).slice(2,5).toUpperCase()}`;
+}
+function renderBarcodeSvgs(){
+  if(!window.JsBarcode)return;
+  document.querySelectorAll("svg[data-barcode]").forEach(svg=>{
+    try{
+      window.JsBarcode(svg,svg.dataset.barcode,{
+        format:"CODE128",displayValue:true,height:48,margin:2,fontSize:11,width:1.55
+      });
+    }catch(e){console.warn("barcode",e)}
+  });
+}
+function catalogImage(p,cls="catalog-photo"){
+  return p.image_url?`<img class="${cls}" src="${esc(p.image_url)}" alt="${esc(catalogFullName(p))}">`:`<div class="${cls} catalog-photo-empty">${esc(initials(p.brand||p.product_name))}</div>`;
+}
+function defaultShoeSizes(){return Array.from({length:11},(_,i)=>String(35+i))}
+function parseSizes(value){
+  return [...new Set(String(value||"").split(/[,;\s]+/).map(x=>x.trim()).filter(Boolean))];
+}
+
+function renderCatalog(t){
+  t.innerHTML=`
+    ${pageHead("Produtos & Códigos","Cada modelo, foto e código fica guardado só nesta área.",`
+      <button class="btn btn-light" id="printCodes">Imprimir códigos</button>
+      <button class="btn" id="scanEntry">📷 Scanear entrada</button>`)}
+    <div class="two-col catalog-layout">
+      <section class="card">
+        <div class="section-head">
+          <h2>Os teus códigos</h2><span class="spacer"></span>
+          <input class="search" id="catalogSearch" placeholder="Pesquisar marca, modelo ou código">
+        </div>
+        <div id="catalogList"></div>
+      </section>
+      <section class="card catalog-create-panel">
+        <div class="section-head"><h2>+ Criar produto/código</h2></div>
+        <div class="grid">
+          <label>Marca<input id="catBrand" placeholder="Ex.: NIKE"></label>
+          <label>Modelo / produto<input id="catProduct" placeholder="Ex.: AIR FORCE 1"></label>
+          <label>Cor / variante<input id="catVariant" placeholder="Ex.: BRANCAS"></label>
+          <label>Foto do produto<input id="catImage" type="file" accept="image/png,image/jpeg,image/webp"></label>
+          <label>Tamanhos
+            <input id="catSizes" value="${defaultShoeSizes().join(", ")}" placeholder="35, 36, 37... ou S, M, L">
+          </label>
+          <div class="btn-row">
+            <button class="btn btn-soft" id="shoeSizes">Calçado 35–45</button>
+            <button class="btn btn-soft" id="clothingSizes">Roupa XS–XXL</button>
+          </div>
+          <label>Custo padrão / unidade (€) <span class="muted">(opcional)</span>
+            <input id="catCost" type="number" min="0" step="0.01" value="0">
+          </label>
+          <label>Código de barras
+            <input id="catBarcode" value="${esc(generateCatalogBarcode())}">
+          </label>
+          <button class="btn" id="saveCatalog">Guardar e gerar código</button>
+          <div id="catalogMsg" class="notice" hidden></div>
+        </div>
+      </section>
+    </div>`;
+
+  const search=document.getElementById("catalogSearch");
+  const draw=()=>{
+    const q=search.value.trim().toLowerCase();
+    const list=state.catalog.filter(p=>!q||[p.brand,p.product_name,p.variant,p.barcode].join(" ").toLowerCase().includes(q));
+    document.getElementById("catalogList").innerHTML=list.length?`
+      <div class="catalog-grid">${list.map(p=>`
+        <article class="catalog-card" data-catalog-card="${p.id}">
+          <div class="catalog-card-top">
+            ${catalogImage(p)}
+            <div class="catalog-info">
+              <strong>${esc(p.product_name)}</strong>
+              <span>${esc([p.brand,p.variant].filter(Boolean).join(" · "))}</span>
+              <small>Tamanhos: ${esc((p.sizes||[]).join(", "))}</small>
+            </div>
+          </div>
+          <div class="barcode-box"><svg data-barcode="${esc(p.barcode)}"></svg></div>
+          <div class="btn-row">
+            <button class="btn btn-light" data-catalog-entry="${p.id}">Dar entrada</button>
+            <button class="btn btn-danger" data-catalog-delete="${p.id}">Apagar</button>
+          </div>
+        </article>`).join("")}</div>`
+      :`<div class="empty">Ainda não criaste códigos neste utilizador.</div>`;
+    renderBarcodeSvgs();
+    document.querySelectorAll("[data-catalog-entry]").forEach(b=>b.onclick=()=>showCatalogEntry(b.dataset.catalogEntry));
+    document.querySelectorAll("[data-catalog-delete]").forEach(b=>b.onclick=()=>deleteCatalogProduct(b.dataset.catalogDelete));
+  };
+  search.oninput=draw;draw();
+
+  document.getElementById("shoeSizes").onclick=()=>document.getElementById("catSizes").value=defaultShoeSizes().join(", ");
+  document.getElementById("clothingSizes").onclick=()=>document.getElementById("catSizes").value="XS, S, M, L, XL, XXL";
+  document.getElementById("catBarcode").ondblclick=e=>e.target.value=generateCatalogBarcode();
+  document.getElementById("saveCatalog").onclick=saveCatalogProduct;
+  document.getElementById("scanEntry").onclick=openScannerModal;
+  document.getElementById("printCodes").onclick=()=>window.print();
+}
+
+async function saveCatalogProduct(){
+  const msg=document.getElementById("catalogMsg");hide(msg);
+  const brand=document.getElementById("catBrand").value.trim();
+  const product_name=document.getElementById("catProduct").value.trim();
+  const variant=document.getElementById("catVariant").value.trim()||null;
+  const sizes=parseSizes(document.getElementById("catSizes").value);
+  const default_unit_cost=Math.max(0,Number(document.getElementById("catCost").value||0));
+  const barcode=document.getElementById("catBarcode").value.trim()||generateCatalogBarcode();
+  const file=document.getElementById("catImage").files?.[0];
+
+  if(!product_name)return show(msg,"Escreve o modelo/produto.","error");
+  if(!sizes.length)return show(msg,"Mete pelo menos um tamanho.","error");
+  if(file&&file.size>5*1024*1024)return show(msg,"A foto tem de ter menos de 5 MB.","error");
+
+  const {data:created,error}=await supabase.from("product_catalog").insert({
+    workspace_id:state.workspace.id,brand:brand||null,product_name,variant,barcode,sizes,default_unit_cost
+  }).select().single();
+
+  if(error)return show(msg,error.code==="23505"?"Esse código já existe nesta conta.":error.message,"error");
+
+  if(file){
+    const ext=(file.name.split(".").pop()||"jpg").toLowerCase();
+    const path=`${state.workspace.id}/${created.id}.${ext}`;
+    const {error:upErr}=await supabase.storage.from("product-images").upload(path,file,{upsert:true,contentType:file.type});
+    if(!upErr){
+      const {data:urlData}=supabase.storage.from("product-images").getPublicUrl(path);
+      await supabase.from("product_catalog").update({image_url:urlData.publicUrl,updated_at:new Date().toISOString()}).eq("id",created.id);
+    }
+  }
+
+  await loadWorkspaceData();
+  renderCatalog(document.getElementById("page"));
+}
+
+async function deleteCatalogProduct(id){
+  const p=state.catalog.find(x=>x.id===id);
+  if(!p||!confirm(`Apagar o código de ${catalogFullName(p)}? O stock existente não é apagado.`))return;
+  const {error}=await supabase.from("product_catalog").delete().eq("id",id);
+  if(error)return alert(error.message);
+  await loadWorkspaceData();
+  renderCatalog(document.getElementById("page"));
+}
+
+function openScannerModal(){
+  document.body.insertAdjacentHTML("beforeend",`<div class="modal-backdrop" id="scannerModal">
+    <section class="modal scanner-modal">
+      <div class="modal-head"><h2>Scanear entrada de stock</h2><span class="spacer"></span><button class="icon-btn" id="closeScanner">×</button></div>
+      <div class="scanner-guide">Aponta a câmara para um código do teu livro.</div>
+      <div id="barcodeReader" class="barcode-reader"></div>
+      <div class="scanner-manual">
+        <span>Ou escreve o código:</span>
+        <div class="btn-row"><input id="manualBarcode" placeholder="Código de barras"><button class="btn btn-light" id="manualFind">Procurar</button></div>
+      </div>
+      <div id="scanResult"></div>
+    </section>
+  </div>`);
+
+  const close=async()=>{
+    await stopScanner();
+    document.getElementById("scannerModal")?.remove();
+  };
+  document.getElementById("closeScanner").onclick=close;
+  document.getElementById("manualFind").onclick=()=>lookupBarcode(document.getElementById("manualBarcode").value.trim());
+  startScanner();
+}
+
+async function startScanner(){
+  const reader=document.getElementById("barcodeReader");
+  if(!reader)return;
+  if(!window.Html5Qrcode){
+    reader.innerHTML=`<div class="notice error">O scanner não carregou. Usa o campo manual abaixo.</div>`;
+    return;
+  }
+  try{
+    const scanner=new window.Html5Qrcode("barcodeReader");
+    state.scanner=scanner;
+    await scanner.start(
+      {facingMode:"environment"},
+      {fps:10,qrbox:{width:280,height:150}},
+      async decoded=>{
+        await stopScanner();
+        lookupBarcode(decoded);
+      },
+      ()=>{}
+    );
+  }catch(err){
+    console.warn(err);
+    reader.innerHTML=`<div class="notice">Não consegui abrir a câmara. Permite acesso à câmara ou escreve o código manualmente.</div>`;
+  }
+}
+
+async function stopScanner(){
+  if(state.scanner){
+    try{await state.scanner.stop()}catch(e){}
+    try{state.scanner.clear()}catch(e){}
+    state.scanner=null;
+  }
+}
+
+function lookupBarcode(code){
+  const normalized=String(code||"").trim();
+  const p=state.catalog.find(x=>String(x.barcode).trim()===normalized);
+  const result=document.getElementById("scanResult");
+  if(!result)return;
+  if(!p){
+    result.innerHTML=`<div class="notice error">Código não encontrado nesta conta: ${esc(normalized||"—")}</div>`;
+    return;
+  }
+  renderEntryForm(result,p);
+}
+
+function showCatalogEntry(id){
+  const p=state.catalog.find(x=>x.id===id);if(!p)return;
+  document.body.insertAdjacentHTML("beforeend",`<div class="modal-backdrop" id="entryModal">
+    <section class="modal"><div class="modal-head"><h2>Dar entrada</h2><span class="spacer"></span><button class="icon-btn" id="closeEntry">×</button></div><div id="entryResult"></div></section>
+  </div>`);
+  document.getElementById("closeEntry").onclick=()=>document.getElementById("entryModal")?.remove();
+  renderEntryForm(document.getElementById("entryResult"),p);
+}
+
+function renderEntryForm(container,p){
+  container.innerHTML=`
+    <div class="scan-product">
+      ${catalogImage(p,"scan-photo")}
+      <div>
+        <span class="scan-ok">✓ Confirma se é este produto</span>
+        <h3>${esc(p.product_name)}</h3>
+        <p>${esc([p.brand,p.variant].filter(Boolean).join(" · "))}</p>
+        <small class="barcode">${esc(p.barcode)}</small>
+      </div>
+    </div>
+    <div class="entry-toolbar">
+      <label>Data de entrada<input data-entry-date type="date" value="${today()}"></label>
+      <label>Custo / unidade (€)<input data-entry-cost type="number" min="0" step="0.01" value="${Number(p.default_unit_cost||0)}"></label>
+    </div>
+    <div class="size-entry-grid">
+      ${(p.sizes||[]).map(size=>`
+        <label class="size-entry-row">
+          <span>${esc(size)}</span>
+          <input type="number" min="0" step="1" value="0" data-entry-size="${esc(size)}">
+        </label>`).join("")}
+    </div>
+    <div class="btn-row entry-save-row">
+      <button class="btn" data-save-entry="${p.id}">Dar entrada no stock</button>
+      <span class="muted">Preenche só os tamanhos que chegaram.</span>
+    </div>
+    <div data-entry-msg class="notice" hidden></div>`;
+
+  container.querySelector(`[data-save-entry="${p.id}"]`).onclick=()=>saveCatalogStockEntry(container,p);
+}
+
+async function saveCatalogStockEntry(container,p){
+  const msg=container.querySelector("[data-entry-msg]");hide(msg);
+  const received_date=container.querySelector("[data-entry-date]").value||today();
+  const unit_cost=Math.max(0,Number(container.querySelector("[data-entry-cost]").value||0));
+  const entries=[...container.querySelectorAll("[data-entry-size]")].map(inp=>({
+    size:inp.dataset.entrySize,quantity:Math.max(0,Math.floor(Number(inp.value||0)))
+  })).filter(x=>x.quantity>0);
+
+  if(!entries.length)return show(msg,"Mete quantidade em pelo menos um tamanho.","error");
+
+  for(const entry of entries){
+    let stock=state.stock.find(s=>s.catalog_id===p.id&&String(s.size||"")===String(entry.size||""));
+    if(stock){
+      const {error}=await supabase.from("stock_items").update({
+        quantity:Number(stock.quantity)+entry.quantity,
+        initial_quantity:Number(stock.initial_quantity||0)+entry.quantity,
+        unit_cost,
+        product_name:catalogFullName(p),
+        updated_at:new Date().toISOString()
+      }).eq("id",stock.id);
+      if(error)return show(msg,`Erro no tamanho ${entry.size}: ${error.message}`,"error");
+    }else{
+      const {data:created,error}=await supabase.from("stock_items").insert({
+        workspace_id:state.workspace.id,
+        catalog_id:p.id,
+        product_name:catalogFullName(p),
+        size:entry.size,
+        quantity:entry.quantity,
+        initial_quantity:entry.quantity,
+        unit_cost,
+        origin:"Compra manual",
+        barcode:null
+      }).select().single();
+      if(error)return show(msg,`Erro no tamanho ${entry.size}: ${error.message}`,"error");
+      stock=created;
+    }
+
+    const {error:receiptErr}=await supabase.from("stock_receipts").insert({
+      workspace_id:state.workspace.id,catalog_id:p.id,stock_item_id:stock.id,
+      product_name:catalogFullName(p),size:entry.size,quantity:entry.quantity,unit_cost,received_date
+    });
+    if(receiptErr)return show(msg,`Stock atualizado, mas falhou o histórico do tamanho ${entry.size}.`,"error");
+  }
+
+  await loadWorkspaceData();
+  show(msg,`Entrada guardada: ${entries.reduce((a,x)=>a+x.quantity,0)} unidades.`,"success");
+  container.querySelectorAll("[data-entry-size]").forEach(inp=>inp.value="0");
+}
+
 function renderStock(t){
   t.innerHTML=`${pageHead("Stock","O que existe fisicamente neste espaço")}<div class="two-col"><section class="card"><div class="section-head"><h2>Stock atual</h2><span class="spacer"></span><input class="search" id="stockSearch" placeholder="Pesquisar produto, tamanho ou código"></div><div id="stockList"></div></section><section class="card"><div class="section-head"><h2>Adicionar stock</h2></div><div class="grid"><label>Produto<input id="stProduct" placeholder="Ex.: ADIDAS SAMBA"></label><div class="grid grid-2"><label>Tamanho<input id="stSize" placeholder="38 / M"></label><label>Quantidade<input id="stQty" type="number" min="1" value="1"></label></div><label>Preço de compra / unidade (€)<input id="stCost" type="number" min="0" step="0.01" value="0"></label><label>Código de barras<input id="stBarcode" placeholder="Opcional"></label><div class="btn-row"><button class="btn btn-light" id="genBarcode">Gerar código</button><button class="btn" id="saveStock">Guardar</button></div><div id="stockMsg" class="notice" hidden></div></div></section></div>`;
   const search=document.getElementById("stockSearch");
   const draw=()=>{const q=search.value.trim().toLowerCase();const list=state.stock.filter(x=>Number(x.quantity)>0&&(!q||[x.product_name,x.size,x.barcode].join(" ").toLowerCase().includes(q)));document.getElementById("stockList").innerHTML=list.length?`<div class="stock-grid">${list.map(x=>`<div class="stock-row"><div class="stock-name"><strong>${esc(x.product_name)}</strong><small>${esc(x.size||"Sem tamanho")} ${x.barcode?`· <span class="barcode">${esc(x.barcode)}</span>`:""}</small></div><div class="stock-qty">${int(x.quantity)}</div><div class="stock-cost">${eur(x.unit_cost)}</div><div class="stock-actions"><button class="icon-btn" data-dec="${x.id}">−</button><button class="icon-btn" data-add="${x.id}">+</button><button class="btn btn-light" data-set="${x.id}">Qtd.</button></div></div>`).join("")}</div>`:`<div class="empty">Nenhum stock encontrado.</div>`;document.querySelectorAll("[data-dec]").forEach(b=>b.onclick=()=>changeStock(b.dataset.dec,-1));document.querySelectorAll("[data-add]").forEach(b=>b.onclick=()=>changeStock(b.dataset.add,1));document.querySelectorAll("[data-set]").forEach(b=>b.onclick=()=>setStock(b.dataset.set))};
   search.oninput=draw;draw();
   document.getElementById("genBarcode").onclick=()=>{const p=(state.workspace.slug||"").startsWith("verseline")?"VE":"ST";document.getElementById("stBarcode").value=`${p}-${Date.now().toString().slice(-8)}-${Math.random().toString(36).slice(2,5).toUpperCase()}`};
-  document.getElementById("saveStock").onclick=async()=>{const msg=document.getElementById("stockMsg");hide(msg);const product_name=document.getElementById("stProduct").value.trim(),size=document.getElementById("stSize").value.trim()||null,quantity=Math.max(1,Number(document.getElementById("stQty").value||1)),unit_cost=Math.max(0,Number(document.getElementById("stCost").value||0)),barcode=document.getElementById("stBarcode").value.trim()||null;if(!product_name)return show(msg,"Escreve o nome do produto.","error");const {error}=await supabase.from("stock_items").insert({workspace_id:state.workspace.id,product_name,size,quantity,initial_quantity:quantity,unit_cost,origin:"Compra manual",barcode});if(error)return show(msg,error.code==="23505"?"Esse código de barras já existe.":error.message,"error");await loadWorkspaceData();renderStock(t)};
+  document.getElementById("saveStock").onclick=async()=>{const msg=document.getElementById("stockMsg");hide(msg);const product_name=document.getElementById("stProduct").value.trim(),size=document.getElementById("stSize").value.trim()||null,quantity=Math.max(1,Number(document.getElementById("stQty").value||1)),unit_cost=Math.max(0,Number(document.getElementById("stCost").value||0)),barcode=document.getElementById("stBarcode").value.trim()||null;if(!product_name)return show(msg,"Escreve o nome do produto.","error");const {data:created,error}=await supabase.from("stock_items").insert({workspace_id:state.workspace.id,product_name,size,quantity,initial_quantity:quantity,unit_cost,origin:"Compra manual",barcode}).select().single();
+    if(error)return show(msg,error.code==="23505"?"Esse código de barras já existe.":error.message,"error");
+    await supabase.from("stock_receipts").insert({workspace_id:state.workspace.id,stock_item_id:created?.id||null,product_name,size,quantity,unit_cost,received_date:today()});
+    await loadWorkspaceData();renderStock(t)};
 }
 async function changeStock(id,delta){const item=state.stock.find(x=>x.id===id);if(!item)return;const next=Number(item.quantity)+delta;if(next<0)return;const {error}=await supabase.from("stock_items").update({quantity:next,updated_at:new Date().toISOString()}).eq("id",id).eq("quantity",item.quantity);if(error)return alert("O stock mudou entretanto. Atualiza e tenta novamente.");await loadWorkspaceData();renderShell()}
 async function setStock(id){const item=state.stock.find(x=>x.id===id);if(!item)return;const v=prompt(`Quantidade atual: ${item.quantity}\nNova quantidade:`,String(item.quantity));if(v===null)return;const next=Math.floor(Number(v));if(!Number.isFinite(next)||next<0)return;const {error}=await supabase.from("stock_items").update({quantity:next,updated_at:new Date().toISOString()}).eq("id",id).eq("quantity",item.quantity);if(error)return alert("O stock mudou entretanto. Atualiza e tenta novamente.");await loadWorkspaceData();renderShell()}

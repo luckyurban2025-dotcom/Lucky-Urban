@@ -20,3 +20,17 @@ index.html, app.js, styles.css, config.js, render.yaml, README.md
 - Receita, Resultado real, Meta, Encomendas, Entregues e Devolvidas mudam com o mês.
 - A lista do Dashboard também mostra apenas as encomendas do mês selecionado.
 - Stock em casa continua a representar o stock físico atual.
+
+
+## v5 — Produtos, códigos de barras e scanner
+- Todos os utilizadores normais têm uma área `Produtos & Códigos`.
+- Cada código pertence exclusivamente ao espaço/utilizador atual.
+- Criação de produto com marca, modelo, variante/cor, foto e tamanhos.
+- Presets 35–45 e XS–XXL.
+- Código de barras CODE128 gerado e imprimível.
+- Botão `Imprimir códigos` para criar um livro/caderno físico.
+- Scanner pela câmara do telemóvel.
+- Ao reconhecer o código mostra FOTO + produto + tamanhos antes de dar entrada.
+- Entrada rápida por tamanho e quantidade.
+- Regista custo e data de entrada para o dashboard mensal.
+- Também existe entrada manual pelo código se a câmara não funcionar.
