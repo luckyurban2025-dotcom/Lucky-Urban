@@ -92,3 +92,38 @@ label{display:grid;gap:6px;color:#444b56;font-size:12px;font-weight:800}input,se
   .edit-order-modal .grid-2,.edit-order-modal .grid-3{grid-template-columns:1fr}
   .stock-actions .btn{padding:8px 9px;font-size:11px}
 }
+
+.dashboard-work-stats{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:14px;margin-bottom:0}
+.work-orders-toolbar{margin-bottom:14px;padding:14px}
+.orders-filter-grid{display:grid;grid-template-columns:180px 190px 210px minmax(220px,1fr);gap:12px}
+.supplier-summary{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-bottom:14px}
+.supplier-kpi{background:#fff;border:1px solid var(--line);border-radius:15px;padding:14px;display:grid;gap:5px}
+.supplier-kpi span{font-size:11px;color:var(--muted);font-weight:800}
+.supplier-kpi strong{font-size:22px}
+.supplier-kpi.paid strong{color:var(--good)}
+.supplier-kpi.unpaid strong{color:var(--bad)}
+.work-order-card{gap:13px}
+.supplier-products{display:grid;gap:8px}
+.supplier-item{display:flex;align-items:center;gap:10px;border:1px solid var(--line);border-radius:12px;padding:10px 12px;background:#fff}
+.supplier-item.is-unpaid{background:#fff8f7;border-color:#f1d0cb}
+.supplier-item.is-paid{background:#f7fbf8;border-color:#d6e9dc}
+.supplier-item-main{display:grid;gap:3px;flex:1;min-width:0}
+.supplier-item-main small{color:var(--muted)}
+.supplier-status{font-weight:900}
+.supplier-status.paid{background:#eaf7ee;color:#176a35}
+.supplier-status.unpaid{background:#fff0ed;color:#b12d20}
+.supplier-status.neutral{background:#f1f3f5;color:#56606c}
+.btn-success{background:#17783d!important;color:#fff!important;border-color:#17783d!important}
+.btn-small{padding:8px 10px;font-size:11px}
+.order-finance-line{display:flex;flex-wrap:wrap;gap:12px 18px;padding:10px 0;border-top:1px solid var(--line);border-bottom:1px solid var(--line);font-size:12px;color:var(--muted)}
+.order-actions-row{align-items:end}
+.supplier-paid-check{align-self:end;min-height:42px}
+@media(max-width:1100px){
+  .dashboard-work-stats{grid-template-columns:repeat(3,minmax(0,1fr))}
+  .orders-filter-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+@media(max-width:760px){
+  .dashboard-work-stats,.supplier-summary,.orders-filter-grid{grid-template-columns:1fr}
+  .supplier-item{align-items:flex-start;flex-wrap:wrap}
+  .supplier-item-main{flex-basis:100%}
+}

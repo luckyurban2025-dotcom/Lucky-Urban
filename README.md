@@ -45,3 +45,16 @@ index.html, app.js, styles.css, config.js, render.yaml, README.md
 - Corrige produto, tamanho, quantidade, custo e código.
 - Ajustes rápidos + / - / Qtd. também ficam registados como correções.
 - Histórico de correções guardado na base de dados.
+
+
+## v6 — Gestão de fornecedores por encomenda
+- Encomendas passam a abrir filtradas pelo mês atual.
+- Podes escolher qualquer mês, estado e situação do fornecedor.
+- Resumo: custo fornecedor, já pago e por pagar.
+- Cada produto comprado para uma encomenda tem fornecedor próprio.
+- Botão Marcar pago / Marcar por pagar em cada produto.
+- Artigos usados do stock não aparecem como dívida a fornecedor.
+- Nova encomenda permite indicar fornecedor e se já foi pago.
+- Editar encomenda permite corrigir fornecedor e pagamento.
+- Dashboard mostra Pago a fornecedores e Por pagar a fornecedores das encomendas do mês.
+- Estado do pagamento fica separado por utilizador/espaço.

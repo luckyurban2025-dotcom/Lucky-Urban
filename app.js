@@ -7,7 +7,7 @@ const LABEL=Object.fromEntries(MODULES);
 const CHANNELS=["Shopify","Instagram","Facebook","WhatsApp","Vinted"];
 const STATUSES=["Em trânsito","Entregue","Devolvido","Cancelado antes envio"];
 const EXPENSE_TYPES=["Shopify","Apps","Embalagens","Domínio","Material","Outro"];
-const state={session:null,access:null,directory:[],workspaces:[],workspace:null,page:"dashboard",stock:[],orders:[],items:[],shipping:[],meta:[],expenses:[],catalog:[],receipts:[],adminUsers:[],dashboardMonth:new Date().toISOString().slice(0,7),scanner:null};
+const state={session:null,access:null,directory:[],workspaces:[],workspace:null,page:"dashboard",stock:[],orders:[],items:[],shipping:[],meta:[],expenses:[],catalog:[],receipts:[],adminUsers:[],dashboardMonth:new Date().toISOString().slice(0,7),ordersMonth:new Date().toISOString().slice(0,7),scanner:null};
 const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"}[c]));
 const eur=n=>new Intl.NumberFormat("pt-PT",{style:"currency",currency:"EUR"}).format(Number(n||0));
 const int=n=>new Intl.NumberFormat("pt-PT",{maximumFractionDigits:0}).format(Number(n||0));
@@ -170,6 +170,10 @@ function renderDashboard(t){
   const delivered=orders.filter(x=>x.status==="Entregue").length;
   const returned=orders.filter(x=>x.status==="Devolvido").length;
   const monthOrders=[...orders].sort((a,b)=>String(b.order_date).localeCompare(String(a.order_date))).slice(0,5);
+  const monthOrderIds=new Set(orders.map(o=>o.id));
+  const supplierItems=state.items.filter(i=>monthOrderIds.has(i.order_id)&&i.source==="purchased");
+  const supplierPaid=supplierItems.filter(i=>i.supplier_paid).reduce((a,i)=>a+Number(i.quantity||0)*Number(i.purchase_price||0),0);
+  const supplierUnpaid=supplierItems.filter(i=>!i.supplier_paid).reduce((a,i)=>a+Number(i.quantity||0)*Number(i.purchase_price||0),0);
   const label=monthLabel(month);
 
   t.innerHTML=`
@@ -209,10 +213,12 @@ function renderDashboard(t){
       </div>
     </div>
 
-    <div class="grid grid-3 dashboard-counts">
+    <div class="dashboard-work-stats">
       <div class="soft-card"><div class="stat-label">Encomendas</div><div class="stat-value">${orders.length}</div></div>
       <div class="soft-card"><div class="stat-label">Entregues</div><div class="stat-value good">${delivered}</div></div>
       <div class="soft-card"><div class="stat-label">Devolvidas</div><div class="stat-value bad">${returned}</div></div>
+      <div class="soft-card supplier-paid-card"><div class="stat-label">Pago a fornecedores</div><div class="stat-value good">${eur(supplierPaid)}</div><div class="stat-note">encomendas deste mês</div></div>
+      <div class="soft-card supplier-unpaid-card"><div class="stat-label">Por pagar a fornecedores</div><div class="stat-value ${supplierUnpaid>0?"bad":""}">${eur(supplierUnpaid)}</div><div class="stat-note">encomendas deste mês</div></div>
     </div>
 
     <div class="two-col" style="margin-top:16px">
@@ -645,14 +651,41 @@ function openEditStock(id){
 
 function orderItemTemplate(i){
   const options=state.stock.filter(s=>Number(s.quantity)>0).map(s=>`<option value="${s.id}">${esc(s.product_name)} · ${esc(s.size||"-")} · ${s.quantity} un.</option>`).join("");
-  return `<div class="order-item" data-item="${i}"><div class="order-item-title"><strong>Produto ${i+1}</strong></div><div class="grid grid-3"><label>Vai usar stock?<select data-f="useStock"><option value="yes">SIM — escolher do stock</option><option value="no">NÃO — comprado / sem stock</option></select></label><label>Quantidade<input data-f="qty" type="number" min="1" value="1"></label><label>Preço venda / unidade (€)<input data-f="sale" type="number" min="0" step="0.01" value="0"></label></div><div class="order-box" data-box="stock"><label>Escolhe o artigo<select data-f="stockId"><option value="">— escolher —</option>${options}</select></label></div><div class="order-box hidden" data-box="manual"><div class="grid grid-3"><label>Produto<input data-f="product"></label><label>Tamanho<input data-f="size"></label><label>Quanto te custou / unidade (€)<input data-f="purchase" type="number" min="0" step="0.01" value="0"></label></div></div></div>`;
+  return `<div class="order-item" data-item="${i}"><div class="order-item-title"><strong>Produto ${i+1}</strong></div><div class="grid grid-3"><label>Vai usar stock?<select data-f="useStock"><option value="yes">SIM — escolher do stock</option><option value="no">NÃO — comprado / sem stock</option></select></label><label>Quantidade<input data-f="qty" type="number" min="1" value="1"></label><label>Preço venda / unidade (€)<input data-f="sale" type="number" min="0" step="0.01" value="0"></label></div><div class="order-box" data-box="stock"><label>Escolhe o artigo<select data-f="stockId"><option value="">— escolher —</option>${options}</select></label></div><div class="order-box hidden" data-box="manual">
+  <div class="grid grid-3">
+    <label>Produto<input data-f="product"></label>
+    <label>Tamanho<input data-f="size"></label>
+    <label>Quanto te custou / unidade (€)<input data-f="purchase" type="number" min="0" step="0.01" value="0"></label>
+  </div>
+  <div class="grid grid-2" style="margin-top:10px">
+    <label>Fornecedor <span class="muted">(opcional)</span><input data-f="supplier" placeholder="Ex.: Fornecedor Espanha"></label>
+    <label class="check-row supplier-paid-check"><input data-f="supplierPaid" type="checkbox"> Já paguei este produto ao fornecedor</label>
+  </div>
+</div></div>`;
 }
 function renderNewOrder(t){
   t.innerHTML=`${pageHead("Nova encomenda","Escolhe quantos produtos e só aparecem esses produtos")}<section class="card"><div class="grid grid-4"><label>Data<input id="oDate" type="date" value="${today()}"></label><label>Nº encomenda / referência<input id="oRef" placeholder="#1501"></label><label>Canal<select id="oChannel">${CHANNELS.map(x=>`<option>${x}</option>`).join("")}</select></label><label>Tipo de portes<select id="oShipping">${state.shipping.map(x=>`<option>${esc(x.shipping_type)}</option>`).join("")}</select></label></div><div class="grid grid-2" style="margin-top:14px"><label>Quantos produtos?<select id="oCount">${Array.from({length:10},(_,i)=>`<option value="${i+1}">${i+1}</option>`).join("")}</select></label><label>Estado<select id="oStatus">${STATUSES.map(x=>`<option>${x}</option>`).join("")}</select></label></div><hr class="sep"><div id="orderItems" class="grid"></div><hr class="sep"><div class="btn-row"><button class="btn" id="saveOrder">Guardar encomenda</button><span class="muted" id="orderPreview"></span></div><div id="orderMsg" class="notice" hidden></div></section>`;
   const box=document.getElementById("orderItems"),count=document.getElementById("oCount");
   const draw=()=>{box.innerHTML=Array.from({length:Number(count.value)},(_,i)=>orderItemTemplate(i)).join("");box.querySelectorAll("[data-f='useStock']").forEach(sel=>sel.onchange=()=>{const row=sel.closest("[data-item]");row.querySelector("[data-box='stock']").classList.toggle("hidden",sel.value!=="yes");row.querySelector("[data-box='manual']").classList.toggle("hidden",sel.value==="yes");previewOrder()});box.querySelectorAll("input,select").forEach(x=>x.addEventListener("input",previewOrder));previewOrder()};count.onchange=draw;draw();document.getElementById("saveOrder").onclick=saveOrder;
 }
-function readItems(){return [...document.querySelectorAll("[data-item]")].map(row=>{const use=row.querySelector("[data-f='useStock']").value==="yes",qty=Math.max(1,Number(row.querySelector("[data-f='qty']").value||1)),sale=Math.max(0,Number(row.querySelector("[data-f='sale']").value||0));if(use){const stockId=row.querySelector("[data-f='stockId']").value,st=state.stock.find(s=>s.id===stockId);return{source:"stock",stockId,stock:st,product_name:st?.product_name||"",size:st?.size||"",qty,sale,purchase:0}}return{source:"purchased",stockId:null,product_name:row.querySelector("[data-f='product']").value.trim(),size:row.querySelector("[data-f='size']").value.trim(),qty,sale,purchase:Math.max(0,Number(row.querySelector("[data-f='purchase']").value||0))}})}
+function readItems(){return [...document.querySelectorAll("[data-item]")].map(row=>{
+  const use=row.querySelector("[data-f='useStock']").value==="yes";
+  const qty=Math.max(1,Number(row.querySelector("[data-f='qty']").value||1));
+  const sale=Math.max(0,Number(row.querySelector("[data-f='sale']").value||0));
+  if(use){
+    const stockId=row.querySelector("[data-f='stockId']").value,st=state.stock.find(s=>s.id===stockId);
+    return{source:"stock",stockId,stock:st,product_name:st?.product_name||"",size:st?.size||"",qty,sale,purchase:0,supplier_name:null,supplier_paid:false}
+  }
+  return{
+    source:"purchased",stockId:null,
+    product_name:row.querySelector("[data-f='product']").value.trim(),
+    size:row.querySelector("[data-f='size']").value.trim(),
+    qty,sale,
+    purchase:Math.max(0,Number(row.querySelector("[data-f='purchase']").value||0)),
+    supplier_name:row.querySelector("[data-f='supplier']")?.value.trim()||null,
+    supplier_paid:!!row.querySelector("[data-f='supplierPaid']")?.checked
+  }
+})}
 function aggregateStock(items){const m=new Map();for(const it of items.filter(x=>x.source==="stock"&&x.stockId))m.set(it.stockId,(m.get(it.stockId)||0)+it.qty);return m}
 function previewOrder(){const el=document.getElementById("orderPreview");if(!el)return;el.textContent=`Total de venda: ${eur(readItems().reduce((a,x)=>a+x.qty*x.sale,0))}`}
 async function getMetaPerOrder(date,channel){if(channel==="Vinted")return 0;const spend=state.meta.filter(x=>x.spend_date===date).reduce((a,x)=>a+Number(x.amount||0),0),n=state.orders.filter(x=>x.order_date===date&&x.channel!=="Vinted").length+1;return n?spend/n:0}
@@ -663,16 +696,201 @@ async function saveOrder(){
   const usage=aggregateStock(items);for(const [id,qty] of usage){const st=state.stock.find(x=>x.id===id);if(!st||Number(st.quantity)<qty)return show(msg,`Stock insuficiente de ${st?.product_name||"um artigo"}.`,"error")}
   const rate=state.shipping.find(x=>x.shipping_type===shipping_type),shipping_out=status==="Cancelado antes envio"?0:Number(rate?.outbound_cost||0),shipping_return=status==="Devolvido"?Number(rate?.return_cost||0):0,totalSale=items.reduce((a,x)=>a+x.qty*x.sale,0),productCost=items.reduce((a,x)=>a+(x.source==="purchased"?x.qty*x.purchase:0),0),meta_cost=await getMetaPerOrder(order_date,channel),revenue=status==="Entregue"?totalSale:0,result=revenue-productCost-shipping_out-shipping_return-meta_cost;
   const {data:order,error}=await supabase.from("orders").insert({workspace_id:state.workspace.id,order_ref,order_date,channel,shipping_type,status,shipping_out,shipping_return,meta_cost,revenue,result}).select().single();if(error)return show(msg,error.code==="23505"?"Já existe uma encomenda com essa referência.":error.message,"error");
-  const rows=items.map(it=>({workspace_id:state.workspace.id,order_id:order.id,product_name:it.product_name,size:it.size||null,quantity:it.qty,sale_price:it.sale,source:it.source,purchase_price:it.purchase,stock_item_id:it.stockId}));const {error:itemErr}=await supabase.from("order_items").insert(rows);if(itemErr){await supabase.from("orders").delete().eq("id",order.id);return show(msg,"Não foi possível guardar os produtos.","error")}
+  const rows=items.map(it=>({
+    workspace_id:state.workspace.id,
+    order_id:order.id,
+    product_name:it.product_name,
+    size:it.size||null,
+    quantity:it.qty,
+    sale_price:it.sale,
+    source:it.source,
+    purchase_price:it.purchase,
+    stock_item_id:it.stockId,
+    supplier_name:it.source==="purchased"?(it.supplier_name||null):null,
+    supplier_paid:it.source==="purchased"?!!it.supplier_paid:false,
+    supplier_paid_at:it.source==="purchased"&&it.supplier_paid?new Date().toISOString():null
+  }));const {error:itemErr}=await supabase.from("order_items").insert(rows);if(itemErr){await supabase.from("orders").delete().eq("id",order.id);return show(msg,"Não foi possível guardar os produtos.","error")}
   if(status==="Em trânsito"||status==="Entregue")for(const [id,qty] of usage){const st=state.stock.find(x=>x.id===id);const {error:se}=await supabase.from("stock_items").update({quantity:Number(st.quantity)-qty,updated_at:new Date().toISOString()}).eq("id",id).eq("quantity",st.quantity);if(se)return show(msg,"Encomenda criada, mas o stock mudou entretanto. Confere o stock antes de continuar.","error")}
   if(status==="Devolvido")for(const it of items.filter(x=>x.source==="purchased"))await supabase.from("stock_items").insert({workspace_id:state.workspace.id,product_name:it.product_name,size:it.size||null,quantity:it.qty,initial_quantity:it.qty,unit_cost:it.purchase,origin:"Devolução",source_order_id:order.id});
   await loadWorkspaceData();await recalcDate(order_date);await loadWorkspaceData();go("orders");
 }
 async function recalcDate(date){const orders=state.orders.filter(o=>o.order_date===date),spend=state.meta.filter(x=>x.spend_date===date).reduce((a,x)=>a+Number(x.amount||0),0),eligible=orders.filter(x=>x.channel!=="Vinted"),per=eligible.length?spend/eligible.length:0;for(const o of orders){const items=state.items.filter(i=>i.order_id===o.id),cost=items.reduce((a,i)=>a+(i.source==="purchased"?Number(i.quantity)*Number(i.purchase_price):0),0),sale=items.reduce((a,i)=>a+Number(i.quantity)*Number(i.sale_price),0),meta=o.channel==="Vinted"?0:per,revenue=o.status==="Entregue"?sale:0,result=revenue-cost-Number(o.shipping_out||0)-Number(o.shipping_return||0)-meta;await supabase.from("orders").update({meta_cost:meta,revenue,result,updated_at:new Date().toISOString()}).eq("id",o.id)}}
 function allowedNext(s){if(s==="Cancelado antes envio")return["Cancelado antes envio","Em trânsito","Entregue"];if(s==="Em trânsito")return["Em trânsito","Entregue","Devolvido"];if(s==="Entregue")return["Entregue","Devolvido"];return["Devolvido"]}
+function supplierStateForOrder(items){
+  const bought=items.filter(i=>i.source==="purchased");
+  if(!bought.length)return {key:"stock",label:"Só stock",className:"neutral"};
+  const unpaid=bought.filter(i=>!i.supplier_paid);
+  if(!unpaid.length)return {key:"paid",label:"Fornecedor pago",className:"paid"};
+  return {key:"unpaid",label:`Por pagar (${unpaid.length})`,className:"unpaid"};
+}
+
+function supplierCost(items,paidState=null){
+  return items
+    .filter(i=>i.source==="purchased"&&(paidState===null||!!i.supplier_paid===paidState))
+    .reduce((a,i)=>a+Number(i.quantity||0)*Number(i.purchase_price||0),0);
+}
+
+async function toggleSupplierPayment(itemId,nextPaid){
+  const item=state.items.find(i=>i.id===itemId);
+  if(!item||item.source!=="purchased")return;
+  if(!nextPaid&&!confirm("Marcar este produto novamente como POR PAGAR?"))return;
+
+  const {error}=await supabase.rpc("set_supplier_paid",{
+    p_order_item_id:item.id,
+    p_paid:nextPaid,
+    p_supplier_name:item.supplier_name||null,
+    p_note:null
+  });
+  if(error)return alert("Não foi possível atualizar o pagamento: "+error.message);
+
+  await loadWorkspaceData();
+  renderOrders(document.getElementById("page"));
+}
+
 function renderOrders(t){
-  t.innerHTML=`${pageHead("Encomendas","Atualiza o estado quando a entrega mudar",`<button class="btn" id="newOrderBtn">+ Nova encomenda</button>`)}<div class="section-head"><input class="search" id="orderSearch" placeholder="Pesquisar encomenda ou produto"></div><div id="orderList" class="grid"></div>`;document.getElementById("newOrderBtn").onclick=()=>go("new-order");
-  const search=document.getElementById("orderSearch"),draw=()=>{const q=search.value.toLowerCase().trim(),list=state.orders.filter(o=>!q||[o.order_ref,o.channel,o.status,...state.items.filter(i=>i.order_id===o.id).map(i=>i.product_name)].join(" ").toLowerCase().includes(q));document.getElementById("orderList").innerHTML=list.length?list.map(o=>{const items=state.items.filter(i=>i.order_id===o.id);return`<article class="order-card"><div class="order-top"><strong>${esc(o.order_ref)}</strong><span class="badge">${esc(o.channel)}</span><span class="muted">${esc(o.order_date)}</span><span class="spacer"></span><strong class="${Number(o.result)>=0?"good":"bad"}">${eur(o.result)}</strong></div><div class="order-products">${items.map(i=>`<div>${i.quantity}× <strong>${esc(i.product_name)}</strong> · ${esc(i.size||"-")} · ${eur(i.sale_price)}</div>`).join("")}</div><div class="btn-row"><button class="btn btn-light" data-edit-order="${o.id}">Editar</button><label style="min-width:220px">Estado<select data-order-status="${o.id}" ${o.status==="Devolvido"?"disabled":""}>${allowedNext(o.status).map(s=>`<option ${s===o.status?"selected":""}>${s}</option>`).join("")}</select></label><span class="muted">Receita ${eur(o.revenue)} · Meta ${eur(o.meta_cost)} · Portes ${eur(Number(o.shipping_out)+Number(o.shipping_return))}</span></div></article>`}).join(""):`<div class="card empty">Ainda não tens encomendas.</div>`;document.querySelectorAll("[data-order-status]").forEach(s=>s.onchange=()=>changeOrderStatus(s.dataset.orderStatus,s.value));document.querySelectorAll("[data-edit-order]").forEach(b=>b.onclick=()=>openEditOrder(b.dataset.editOrder))};search.oninput=draw;draw();
+  const month=state.ordersMonth||today().slice(0,7);
+  state.ordersMonth=month;
+
+  t.innerHTML=`
+    ${pageHead("Encomendas","Controla encomendas e pagamentos aos fornecedores num só sítio.",`<button class="btn" id="newOrderBtn">+ Nova encomenda</button>`)}
+
+    <section class="card work-orders-toolbar">
+      <div class="orders-filter-grid">
+        <label>Mês
+          <input id="ordersMonth" type="month" value="${esc(month)}">
+        </label>
+        <label>Fornecedor
+          <select id="supplierFilter">
+            <option value="all">Todos</option>
+            <option value="unpaid">Por pagar</option>
+            <option value="paid">Pagos</option>
+            <option value="stock">Só artigos do stock</option>
+          </select>
+        </label>
+        <label>Estado
+          <select id="orderStatusFilter">
+            <option value="all">Todos os estados</option>
+            ${STATUSES.map(s=>`<option value="${esc(s)}">${esc(s)}</option>`).join("")}
+          </select>
+        </label>
+        <label>Pesquisar
+          <input id="orderSearch" placeholder="Nº, produto, fornecedor...">
+        </label>
+      </div>
+    </section>
+
+    <div id="supplierSummary"></div>
+    <div id="orderList" class="grid"></div>`;
+
+  document.getElementById("newOrderBtn").onclick=()=>go("new-order");
+  const monthInput=document.getElementById("ordersMonth");
+  const supplierFilter=document.getElementById("supplierFilter");
+  const statusFilter=document.getElementById("orderStatusFilter");
+  const search=document.getElementById("orderSearch");
+
+  const draw=()=>{
+    const selectedMonth=monthInput.value||month;
+    state.ordersMonth=selectedMonth;
+    const q=search.value.toLowerCase().trim();
+
+    const monthOrders=state.orders.filter(o=>String(o.order_date).startsWith(selectedMonth));
+    const monthIds=new Set(monthOrders.map(o=>o.id));
+    const monthBought=state.items.filter(i=>monthIds.has(i.order_id)&&i.source==="purchased");
+    const totalSupplier=supplierCost(monthBought);
+    const paidSupplier=supplierCost(monthBought,true);
+    const unpaidSupplier=supplierCost(monthBought,false);
+
+    document.getElementById("supplierSummary").innerHTML=`
+      <div class="supplier-summary">
+        <div class="supplier-kpi"><span>Encomendas do mês</span><strong>${monthOrders.length}</strong></div>
+        <div class="supplier-kpi"><span>Custo fornecedor</span><strong>${eur(totalSupplier)}</strong></div>
+        <div class="supplier-kpi paid"><span>Já pago</span><strong>${eur(paidSupplier)}</strong></div>
+        <div class="supplier-kpi unpaid"><span>Por pagar</span><strong>${eur(unpaidSupplier)}</strong></div>
+      </div>`;
+
+    const list=monthOrders.filter(o=>{
+      const items=state.items.filter(i=>i.order_id===o.id);
+      const supplierState=supplierStateForOrder(items);
+
+      if(supplierFilter.value!=="all"&&supplierState.key!==supplierFilter.value)return false;
+      if(statusFilter.value!=="all"&&o.status!==statusFilter.value)return false;
+
+      if(q){
+        const hay=[o.order_ref,o.channel,o.status,
+          ...items.flatMap(i=>[i.product_name,i.size,i.supplier_name||""])
+        ].join(" ").toLowerCase();
+        if(!hay.includes(q))return false;
+      }
+      return true;
+    });
+
+    document.getElementById("orderList").innerHTML=list.length?list.map(o=>{
+      const items=state.items.filter(i=>i.order_id===o.id);
+      const supplierState=supplierStateForOrder(items);
+      const orderSupplierTotal=supplierCost(items);
+      const orderUnpaid=supplierCost(items,false);
+
+      return `<article class="order-card work-order-card">
+        <div class="order-top">
+          <strong>${esc(o.order_ref)}</strong>
+          <span class="badge">${esc(o.channel)}</span>
+          <span class="badge supplier-status ${supplierState.className}">${esc(supplierState.label)}</span>
+          <span class="muted">${esc(o.order_date)}</span>
+          <span class="spacer"></span>
+          <strong class="${Number(o.result)>=0?"good":"bad"}">${eur(o.result)}</strong>
+        </div>
+
+        <div class="order-products supplier-products">
+          ${items.map(i=>{
+            if(i.source==="stock"){
+              return `<div class="supplier-item stock-source">
+                <div><strong>${i.quantity}× ${esc(i.product_name)}</strong> · ${esc(i.size||"-")}</div>
+                <span class="badge">Do stock</span>
+              </div>`;
+            }
+            const amount=Number(i.quantity||0)*Number(i.purchase_price||0);
+            return `<div class="supplier-item ${i.supplier_paid?"is-paid":"is-unpaid"}">
+              <div class="supplier-item-main">
+                <strong>${i.quantity}× ${esc(i.product_name)}</strong> · ${esc(i.size||"-")}
+                <small>Fornecedor: ${esc(i.supplier_name||"Não indicado")} · ${eur(amount)}</small>
+              </div>
+              <span class="badge supplier-status ${i.supplier_paid?"paid":"unpaid"}">${i.supplier_paid?"PAGO":"POR PAGAR"}</span>
+              <button class="btn ${i.supplier_paid?"btn-light":"btn-success"} btn-small" data-supplier-pay="${i.id}" data-next-paid="${i.supplier_paid?"0":"1"}">
+                ${i.supplier_paid?"Marcar por pagar":"Marcar pago"}
+              </button>
+            </div>`;
+          }).join("")}
+        </div>
+
+        <div class="order-finance-line">
+          <span>Venda ${eur(items.reduce((a,i)=>a+Number(i.quantity||0)*Number(i.sale_price||0),0))}</span>
+          <span>Fornecedor ${eur(orderSupplierTotal)}</span>
+          ${orderUnpaid>0?`<strong class="bad">Falta pagar ${eur(orderUnpaid)}</strong>`:`${orderSupplierTotal>0?`<strong class="good">Fornecedor pago</strong>`:""}`}
+          <span>Portes ${eur(Number(o.shipping_out)+Number(o.shipping_return))}</span>
+          <span>Meta ${eur(o.meta_cost)}</span>
+        </div>
+
+        <div class="btn-row order-actions-row">
+          <button class="btn btn-light" data-edit-order="${o.id}">Editar</button>
+          <label style="min-width:220px">Estado
+            <select data-order-status="${o.id}" ${o.status==="Devolvido"?"disabled":""}>
+              ${allowedNext(o.status).map(s=>`<option ${s===o.status?"selected":""}>${s}</option>`).join("")}
+            </select>
+          </label>
+        </div>
+      </article>`;
+    }).join(""):`<div class="card empty">Não existem encomendas com estes filtros.</div>`;
+
+    document.querySelectorAll("[data-order-status]").forEach(s=>s.onchange=()=>changeOrderStatus(s.dataset.orderStatus,s.value));
+    document.querySelectorAll("[data-edit-order]").forEach(b=>b.onclick=()=>openEditOrder(b.dataset.editOrder));
+    document.querySelectorAll("[data-supplier-pay]").forEach(b=>b.onclick=()=>toggleSupplierPayment(b.dataset.supplierPay,b.dataset.nextPaid==="1"));
+  };
+
+  monthInput.onchange=draw;
+  supplierFilter.onchange=draw;
+  statusFilter.onchange=draw;
+  search.oninput=draw;
+  draw();
 }
 
 function editStockOptions(selectedId){
@@ -691,6 +909,8 @@ function editOrderItemRow(item,index,locked=false){
         <label>Quantidade<input data-e="qty" type="number" value="${Number(item.quantity)}" readonly></label>
         <label>Preço venda / unid. (€)<input data-e="sale" type="number" min="0" step="0.01" value="${Number(item.sale_price||0)}"></label>
         <label>Custo / unid. (€)<input data-e="purchase" type="number" min="0" step="0.01" value="${Number(item.purchase_price||0)}"></label>
+        ${item.source==="purchased"?`<label>Fornecedor<input data-e="supplier" value="${esc(item.supplier_name||"")}"></label>
+        <label class="check-row"><input data-e="supplierPaid" type="checkbox" ${item.supplier_paid?"checked":""}> Pago ao fornecedor</label>`:""}
       </div>
     </div>`;
   }
@@ -711,6 +931,10 @@ function editOrderItemRow(item,index,locked=false){
         <label>Produto<input data-e="product" value="${esc(item.product_name||"")}"></label>
         <label>Tamanho<input data-e="size" value="${esc(item.size||"")}"></label>
         <label>Custo / unid. (€)<input data-e="purchase" type="number" min="0" step="0.01" value="${Number(item.purchase_price||0)}"></label>
+      </div>
+      <div class="grid grid-2" style="margin-top:10px">
+        <label>Fornecedor<input data-e="supplier" value="${esc(item.supplier_name||"")}"></label>
+        <label class="check-row"><input data-e="supplierPaid" type="checkbox" ${item.supplier_paid?"checked":""}> Pago ao fornecedor</label>
       </div>
     </div>
   </div>`;
@@ -744,7 +968,7 @@ function renumberEditItems(container){
 }
 
 function emptyEditItem(){
-  return {id:"",source:"purchased",stock_item_id:null,product_name:"",size:"",quantity:1,sale_price:0,purchase_price:0};
+  return {id:"",source:"purchased",stock_item_id:null,product_name:"",size:"",quantity:1,sale_price:0,purchase_price:0,supplier_name:"",supplier_paid:false,supplier_paid_at:null,supplier_note:null};
 }
 
 function readEditOrderItems(container,locked){
@@ -754,6 +978,7 @@ function readEditOrderItems(container,locked){
     const sale_price=Math.max(0,Number(row.querySelector('[data-e="sale"]').value||0));
     const purchase_price=Math.max(0,Number(row.querySelector('[data-e="purchase"]')?.value||0));
     const id=row.dataset.id||null;
+    const original=id?state.items.find(i=>i.id===id):null;
 
     if(source==="stock"){
       const stock_item_id=row.querySelector('[data-e="stockId"]').value||null;
@@ -764,14 +989,21 @@ function readEditOrderItems(container,locked){
         id,source,stock_item_id,
         product_name:locked?(productInput?.value||""):(st?.product_name||""),
         size:locked?(sizeInput?.value||""):(st?.size||""),
-        quantity:qty,sale_price,purchase_price:0
+        quantity:qty,sale_price,purchase_price:0,
+        supplier_name:null,supplier_paid:false,supplier_paid_at:null,supplier_note:null
       };
     }
+
+    const supplier_paid=!!row.querySelector('[data-e="supplierPaid"]')?.checked;
     return {
       id,source,stock_item_id:null,
       product_name:row.querySelector('[data-e="product"]').value.trim(),
       size:row.querySelector('[data-e="size"]').value.trim(),
-      quantity:qty,sale_price,purchase_price
+      quantity:qty,sale_price,purchase_price,
+      supplier_name:row.querySelector('[data-e="supplier"]')?.value.trim()||null,
+      supplier_paid,
+      supplier_paid_at:supplier_paid?(original?.supplier_paid_at||null):null,
+      supplier_note:original?.supplier_note||null
     };
   });
 }
