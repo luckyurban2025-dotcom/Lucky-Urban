@@ -573,10 +573,31 @@ async function saveCatalogStockEntry(container,p){
   container.querySelectorAll("[data-entry-size]").forEach(inp=>inp.value="0");
 }
 
+function stockIdentity(item){
+  const normal=v=>String(v||"").trim().replace(/\s+/g," ").toLocaleLowerCase("pt-PT");
+  return `${normal(item.product_name)}\u0000${normal(item.size)}`;
+}
+function stockGroups(){
+  const groups=new Map();
+  for(const item of state.stock){
+    const key=stockIdentity(item);
+    if(!groups.has(key))groups.set(key,[]);
+    groups.get(key).push(item);
+  }
+  return [...groups.values()].map(rows=>{
+    const primary=[...rows].sort((a,b)=>Number(b.quantity||0)-Number(a.quantity||0))[0];
+    return {...primary,quantity:rows.reduce((total,row)=>total+Number(row.quantity||0),0),rows};
+  });
+}
+function stockGroupForId(id){
+  const item=state.stock.find(row=>row.id===id);
+  return item?stockGroups().find(group=>stockIdentity(group)===stockIdentity(item)):null;
+}
+
 function renderStock(t){
   t.innerHTML=`${pageHead("Stock","O que existe fisicamente neste espaço")}<div class="two-col"><section class="card"><div class="section-head"><h2>Stock atual</h2><span class="spacer"></span><input class="search" id="stockSearch" placeholder="Pesquisar produto, tamanho ou código"></div><div id="stockList"></div></section><section class="card"><div class="section-head"><h2>Adicionar stock</h2></div><div class="grid"><label>Produto<input id="stProduct" placeholder="Ex.: ADIDAS SAMBA"></label><div class="grid grid-2"><label>Tamanho<input id="stSize" placeholder="38 / M"></label><label>Quantidade<input id="stQty" type="number" min="1" value="1"></label></div><label>Preço de compra / unidade (€)<input id="stCost" type="number" min="0" step="0.01" value="0"></label><label>Código de barras<input id="stBarcode" placeholder="Opcional"></label><div class="btn-row"><button class="btn btn-light" id="genBarcode">Gerar código</button><button class="btn" id="saveStock">Guardar</button></div><div id="stockMsg" class="notice" hidden></div></div></section></div>`;
   const search=document.getElementById("stockSearch");
-  const draw=()=>{const q=search.value.trim().toLowerCase();const list=state.stock.filter(x=>!q||[x.product_name,x.size,x.barcode].join(" ").toLowerCase().includes(q));document.getElementById("stockList").innerHTML=list.length?`<div class="stock-grid">${list.map(x=>`<div class="stock-row"><div class="stock-name"><strong>${esc(x.product_name)}</strong><small>${esc(x.size||"Sem tamanho")} ${x.barcode?`· <span class="barcode">${esc(x.barcode)}</span>`:""}</small></div><div class="stock-qty">${int(x.quantity)}</div><div class="stock-cost">${eur(x.unit_cost)}</div><div class="stock-actions"><button class="icon-btn" data-dec="${x.id}">−</button><button class="icon-btn" data-add="${x.id}">+</button><button class="btn btn-light" data-set="${x.id}">Qtd.</button><button class="btn btn-light" data-edit-stock="${x.id}">Editar</button></div></div>`).join("")}</div>`:`<div class="empty">Nenhum stock encontrado.</div>`;document.querySelectorAll("[data-dec]").forEach(b=>b.onclick=()=>changeStock(b.dataset.dec,-1));document.querySelectorAll("[data-add]").forEach(b=>b.onclick=()=>changeStock(b.dataset.add,1));document.querySelectorAll("[data-set]").forEach(b=>b.onclick=()=>setStock(b.dataset.set));document.querySelectorAll("[data-edit-stock]").forEach(b=>b.onclick=()=>openEditStock(b.dataset.editStock))};
+  const draw=()=>{const q=search.value.trim().toLowerCase();const list=stockGroups().filter(x=>!q||[x.product_name,x.size,...x.rows.map(r=>r.barcode)].join(" ").toLowerCase().includes(q));document.getElementById("stockList").innerHTML=list.length?`<div class="stock-grid">${list.map(x=>`<div class="stock-row"><div class="stock-name"><strong>${esc(x.product_name)}</strong><small>${esc(x.size||"Sem tamanho")} ${x.barcode?`· <span class="barcode">${esc(x.barcode)}</span>`:""}</small></div><div class="stock-qty">${int(x.quantity)}</div><div class="stock-cost">${eur(x.unit_cost)}</div><div class="stock-actions"><button class="icon-btn" data-dec="${x.id}">−</button><button class="icon-btn" data-add="${x.id}">+</button><button class="btn btn-light" data-set="${x.id}">Qtd.</button><button class="btn btn-light" data-edit-stock="${x.id}">Editar</button></div></div>`).join("")}</div>`:`<div class="empty">Nenhum stock encontrado.</div>`;document.querySelectorAll("[data-dec]").forEach(b=>b.onclick=()=>changeStock(b.dataset.dec,-1));document.querySelectorAll("[data-add]").forEach(b=>b.onclick=()=>changeStock(b.dataset.add,1));document.querySelectorAll("[data-set]").forEach(b=>b.onclick=()=>setStock(b.dataset.set));document.querySelectorAll("[data-edit-stock]").forEach(b=>b.onclick=()=>openEditStock(b.dataset.editStock))};
   search.oninput=draw;draw();
   document.getElementById("genBarcode").onclick=()=>{const p=(state.workspace.slug||"").startsWith("verseline")?"VE":"ST";document.getElementById("stBarcode").value=`${p}-${Date.now().toString().slice(-8)}-${Math.random().toString(36).slice(2,5).toUpperCase()}`};
   document.getElementById("saveStock").onclick=async()=>{const msg=document.getElementById("stockMsg");hide(msg);const product_name=document.getElementById("stProduct").value.trim(),size=document.getElementById("stSize").value.trim()||null,quantity=Math.max(1,Number(document.getElementById("stQty").value||1)),unit_cost=Math.max(0,Number(document.getElementById("stCost").value||0)),barcode=document.getElementById("stBarcode").value.trim()||null;if(!product_name)return show(msg,"Escreve o nome do produto.","error");const {data:created,error}=await supabase.from("stock_items").insert({workspace_id:state.workspace.id,product_name,size,quantity,initial_quantity:quantity,unit_cost,origin:"Compra manual",barcode}).select().single();
@@ -598,28 +619,50 @@ async function saveStockCorrection(item,changes,note){
   return data;
 }
 
+function groupQuantityChanges(group,next){
+  const changes=group.rows.map(row=>({row,quantity:Number(row.quantity||0)}));
+  let difference=next-Number(group.quantity||0);
+  if(difference>=0){
+    changes.find(x=>x.row.id===group.id).quantity+=difference;
+  }else{
+    difference=-difference;
+    for(const change of changes.sort((a,b)=>Number(b.row.quantity||0)-Number(a.row.quantity||0))){
+      const taken=Math.min(change.quantity,difference);
+      change.quantity-=taken;
+      difference-=taken;
+      if(!difference)break;
+    }
+  }
+  return changes;
+}
+async function saveGroupQuantity(group,next,note){
+  for(const change of groupQuantityChanges(group,next)){
+    if(change.quantity!==Number(change.row.quantity||0))await saveStockCorrection(change.row,{...change.row,quantity:change.quantity},note);
+  }
+}
+
 async function changeStock(id,delta){
-  const item=state.stock.find(x=>x.id===id);if(!item)return;
-  const next=Number(item.quantity)+delta;if(next<0)return;
+  const group=stockGroupForId(id);if(!group)return;
+  const next=Number(group.quantity)+delta;if(next<0)return;
   try{
-    await saveStockCorrection(item,{...item,quantity:next},delta>0?"Ajuste rápido +1":"Ajuste rápido -1");
+    await saveGroupQuantity(group,next,delta>0?"Ajuste rápido +1":"Ajuste rápido -1");
     await loadWorkspaceData();renderShell();
-  }catch(e){alert("Não foi possível corrigir o stock: "+e.message)}
+  }catch(e){await loadWorkspaceData();renderShell();alert("Não foi possível corrigir o stock: "+e.message)}
 }
 
 async function setStock(id){
-  const item=state.stock.find(x=>x.id===id);if(!item)return;
-  const v=prompt(`Quantidade atual: ${item.quantity}\nNova quantidade:`,String(item.quantity));
+  const group=stockGroupForId(id);if(!group)return;
+  const v=prompt(`Quantidade atual: ${group.quantity}\nNova quantidade:`,String(group.quantity));
   if(v===null)return;
   const next=Math.floor(Number(v));if(!Number.isFinite(next)||next<0)return;
   try{
-    await saveStockCorrection(item,{...item,quantity:next},"Correção manual de quantidade");
+    await saveGroupQuantity(group,next,"Correção manual de quantidade");
     await loadWorkspaceData();renderShell();
-  }catch(e){alert("Não foi possível corrigir o stock: "+e.message)}
+  }catch(e){await loadWorkspaceData();renderShell();alert("Não foi possível corrigir o stock: "+e.message)}
 }
 
 function openEditStock(id){
-  const item=state.stock.find(x=>x.id===id);if(!item)return;
+  const item=stockGroupForId(id);if(!item)return;
   document.body.insertAdjacentHTML("beforeend",`<div class="modal-backdrop" id="editStockModal"><section class="modal">
     <div class="modal-head"><h2>Editar stock</h2><span class="spacer"></span><button class="icon-btn" id="closeEditStock">×</button></div>
     <div class="grid">
@@ -648,15 +691,18 @@ function openEditStock(id){
     const note=document.getElementById("esNote").value.trim();
     if(!product_name||!Number.isFinite(quantity)||quantity<0||unit_cost<0)return show(msg,"Confirma produto, quantidade e custo.","error");
     try{
-      await saveStockCorrection(item,{product_name,size,quantity,unit_cost,barcode},note||"Edição manual de stock");
+      const changes=groupQuantityChanges(item,quantity);
+      for(const change of changes){
+        await saveStockCorrection(change.row,{product_name,size,quantity:change.quantity,unit_cost,barcode:change.row.id===item.id?barcode:(change.row.barcode||"")},note||"Edição manual de stock");
+      }
       await loadWorkspaceData();close();renderStock(document.getElementById("page"));
-    }catch(e){show(msg,e.message,"error")}
+    }catch(e){await loadWorkspaceData();show(msg,`A correção ficou incompleta: ${e.message}. Fecha e reabre o stock para confirmar os valores.`,"error")}
   };
 }
 
 
 function orderItemTemplate(i){
-  const options=state.stock.filter(s=>Number(s.quantity)>0).map(s=>`<option value="${s.id}">${esc(s.product_name)} · ${esc(s.size||"-")} · ${s.quantity} un.</option>`).join("");
+  const options=stockGroups().filter(s=>Number(s.quantity)>0).map(s=>`<option value="${s.id}">${esc(s.product_name)} · ${esc(s.size||"-")} · ${s.quantity} un.</option>`).join("");
   return `<div class="order-item" data-item="${i}"><div class="order-item-title"><strong>Produto ${i+1}</strong></div><div class="grid grid-3"><label>Vai usar stock?<select data-f="useStock"><option value="yes">SIM — escolher do stock</option><option value="no">NÃO — comprado / sem stock</option></select></label><label>Quantidade<input data-f="qty" type="number" min="1" value="1"></label><label>Preço venda / unidade (€)<input data-f="sale" type="number" min="0" step="0.01" value="0"></label></div><div class="order-box" data-box="stock"><label>Escolhe o artigo<select data-f="stockId"><option value="">— escolher —</option>${options}</select></label></div><div class="order-box hidden" data-box="manual">
   <div class="grid grid-3">
     <label>Produto<input data-f="product"></label>
@@ -930,7 +976,10 @@ function renderOrders(t){
 }
 
 function editStockOptions(selectedId){
-  return state.stock.map(s=>`<option value="${s.id}" ${s.id===selectedId?"selected":""}>${esc(s.product_name)} · ${esc(s.size||"-")} · atual ${Number(s.quantity||0)}</option>`).join("");
+  return stockGroups().filter(s=>Number(s.quantity)>0||s.rows.some(row=>row.id===selectedId)).map(s=>{
+    const value=s.rows.some(row=>row.id===selectedId)?selectedId:s.id;
+    return `<option value="${value}" ${value===selectedId?"selected":""}>${esc(s.product_name)} · ${esc(s.size||"-")} · atual ${Number(s.quantity||0)}</option>`;
+  }).join("");
 }
 
 function editOrderItemRow(item,index,locked=false){

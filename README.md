@@ -75,3 +75,9 @@ index.html, app.js, styles.css, config.js, render.yaml, README.md
 
 ### Atualização
 Substitui `index.html`, `app.js`, `styles.css` e `README.md` na raiz do repositório existente. Não alteres `config.js`. O Render publica o ramo `main` quando o deploy automático está ativo.
+
+## v7.1 — Um produto/tamanho por linha no stock
+- Stock reúne entradas com o mesmo nome e tamanho, ignorando diferenças de maiúsculas e espaços. A quantidade mostrada é a soma de todas as entradas.
+- Exemplo: `AIR FORCE LV` tamanho `41` com 1 unidade numa entrada e 0 noutra aparece uma única vez com quantidade 1.
+- Os botões `+`, `−`, `Qtd.` e `Editar` trabalham sobre a quantidade reunida. O histórico das entradas originais e das devoluções mantém-se na base de dados.
+- A escolha de artigo ao criar ou editar uma encomenda também apresenta cada nome/tamanho uma só vez.
