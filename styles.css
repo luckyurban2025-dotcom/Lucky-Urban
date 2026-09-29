@@ -118,12 +118,50 @@ label{display:grid;gap:6px;color:#444b56;font-size:12px;font-weight:800}input,se
 .order-finance-line{display:flex;flex-wrap:wrap;gap:12px 18px;padding:10px 0;border-top:1px solid var(--line);border-bottom:1px solid var(--line);font-size:12px;color:var(--muted)}
 .order-actions-row{align-items:end}
 .supplier-paid-check{align-self:end;min-height:42px}
+[hidden]{display:none!important}
+.eyebrow{font-size:10px;font-weight:900;letter-spacing:.09em;color:var(--muted)}
+.dashboard-pending{display:flex;gap:20px;align-items:center;justify-content:space-between;margin:16px 0;border-color:#eec9c3;background:#fff9f7}
+.dashboard-pending h2{font-size:21px;letter-spacing:-.03em;margin:7px 0 5px}
+.dashboard-pending p{font-size:12px;color:#605657;margin:0;line-height:1.5}
+.dashboard-pending .btn{flex:none}
+.payables-hero{display:grid;grid-template-columns:minmax(240px,1.2fr) minmax(180px,.8fr) minmax(220px,1fr);gap:22px;align-items:center;margin-bottom:16px;border-left:5px solid #b93830}
+.payables-amount,.payables-secondary{display:grid;gap:4px}
+.payables-amount>strong{font-size:34px;letter-spacing:-.05em;color:var(--bad);line-height:1.1}
+.payables-amount small,.payables-secondary small{color:var(--muted);font-size:11px}
+.payables-secondary{border-left:1px solid var(--line);padding-left:22px}
+.payables-secondary span{font-size:11px;color:var(--muted);font-weight:800}
+.payables-secondary strong{font-size:22px;color:var(--good)}
+.payables-explain{color:#626a76;font-size:12px;line-height:1.5}
+.orders-view-tabs{display:flex;gap:6px;overflow:auto;margin:0 0 14px;border-bottom:1px solid var(--line);padding-bottom:2px}
+.orders-view-tab{border:0;background:transparent;color:#59616d;border-bottom:3px solid transparent;padding:11px 17px 12px;white-space:nowrap;font-weight:800}
+.orders-view-tab.active{color:#14171b;border-bottom-color:#17191d}
+.orders-view-tab span{display:inline-block;background:#f3e5e2;color:#a52b23;border-radius:20px;padding:2px 7px;margin-left:5px;font-size:11px}
+.orders-filter-grid{grid-template-columns:repeat(3,minmax(160px,1fr)) minmax(220px,1.4fr)}
+.orders-results-head{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;margin:19px 0 11px}
+.orders-results-head h2{margin:0;font-size:17px;letter-spacing:-.02em}
+.orders-results-head span{font-size:12px}
+.order-reference{font-size:16px;letter-spacing:-.02em}
+.order-result{display:grid;text-align:right;gap:2px}
+.order-result small{font-size:10px;color:var(--muted)}
+.order-result strong{font-size:16px}
+.work-order-card{border-color:#dfe3e8;box-shadow:0 5px 20px rgba(18,22,30,.025)}
+.work-order-card .supplier-item-main strong{font-size:13px;color:#171a20}
+.work-order-card .supplier-item-main small{line-height:1.45}
+.work-order-card .order-actions-row{justify-content:space-between}
 @media(max-width:1100px){
   .dashboard-work-stats{grid-template-columns:repeat(3,minmax(0,1fr))}
   .orders-filter-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .payables-hero{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .payables-explain{grid-column:1/-1}
 }
 @media(max-width:760px){
   .dashboard-work-stats,.supplier-summary,.orders-filter-grid{grid-template-columns:1fr}
   .supplier-item{align-items:flex-start;flex-wrap:wrap}
   .supplier-item-main{flex-basis:100%}
+  .dashboard-pending{align-items:stretch;flex-direction:column}
+  .payables-hero{grid-template-columns:1fr;gap:14px}
+  .payables-secondary{border-left:0;border-top:1px solid var(--line);padding:14px 0 0}
+  .payables-explain{grid-column:auto}
+  .orders-view-tab{padding:11px 14px}
+  .order-result{width:100%;text-align:left}
 }

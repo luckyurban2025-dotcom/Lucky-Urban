@@ -58,3 +58,20 @@ index.html, app.js, styles.css, config.js, render.yaml, README.md
 - Editar encomenda permite corrigir fornecedor e pagamento.
 - Dashboard mostra Pago a fornecedores e Por pagar a fornecedores das encomendas do mês.
 - Estado do pagamento fica separado por utilizador/espaço.
+
+## v7 — Trabalhar sem perder pagamentos pendentes
+- Encomendas abre em **Por pagar**, reunindo todos os meses, das encomendas mais antigas para as mais recentes.
+- O resumo global mostra o valor por pagar, o valor já pago e o número de encomendas/produtos pendentes.
+- **Por mês** mostra as encomendas e valores do mês escolhido. **Todas** mostra o histórico completo. Estado e pesquisa ajudam a encontrar uma encomenda.
+- Cada produto comprado mostra fornecedor, tamanho, custo, estado do pagamento e data quando paga. Marcar pago pede confirmação do valor. O pagamento é pelo valor integral do produto; pagamentos parciais ainda não são suportados.
+- O Início destaca o total por pagar de todos os meses. O resultado do mês já inclui o custo de produtos comprados mesmo que ainda não tenham sido pagos.
+- Artigos de stock com quantidade zero aparecem para poderes corrigir enganos. A data e o mês inicial usam o fuso de Portugal.
+
+### Uso diário
+1. Abre **Encomendas → Por pagar** e verifica todas as compras ainda em dívida.
+2. Confere produto, tamanho, fornecedor e custo. Se houver erro, usa **Editar encomenda**.
+3. Quando pagares o valor integral do produto, clica **Marcar pago** e confirma. Para desfazer, encontra-o em **Todas** ou **Por mês** e clica **Marcar por pagar**.
+4. Para ver as encomendas de setembro, abre **Por mês** e escolhe setembro. As dívidas antigas continuam no resumo global e na vista **Por pagar**.
+
+### Atualização
+Substitui `index.html`, `app.js`, `styles.css` e `README.md` na raiz do repositório existente. Não alteres `config.js`. O Render publica o ramo `main` quando o deploy automático está ativo.

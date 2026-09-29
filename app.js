@@ -7,11 +7,11 @@ const LABEL=Object.fromEntries(MODULES);
 const CHANNELS=["Shopify","Instagram","Facebook","WhatsApp","Vinted"];
 const STATUSES=["Em trânsito","Entregue","Devolvido","Cancelado antes envio"];
 const EXPENSE_TYPES=["Shopify","Apps","Embalagens","Domínio","Material","Outro"];
-const state={session:null,access:null,directory:[],workspaces:[],workspace:null,page:"dashboard",stock:[],orders:[],items:[],shipping:[],meta:[],expenses:[],catalog:[],receipts:[],adminUsers:[],dashboardMonth:new Date().toISOString().slice(0,7),ordersMonth:new Date().toISOString().slice(0,7),scanner:null};
+const state={session:null,access:null,directory:[],workspaces:[],workspace:null,page:"dashboard",stock:[],orders:[],items:[],shipping:[],meta:[],expenses:[],catalog:[],receipts:[],adminUsers:[],dashboardMonth:new Date().toLocaleDateString("sv-SE",{timeZone:"Europe/Lisbon"}).slice(0,7),ordersMonth:new Date().toLocaleDateString("sv-SE",{timeZone:"Europe/Lisbon"}).slice(0,7),ordersView:"pending",ordersSupplierFilter:"all",ordersStatusFilter:"all",ordersQuery:"",scanner:null};
 const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"}[c]));
 const eur=n=>new Intl.NumberFormat("pt-PT",{style:"currency",currency:"EUR"}).format(Number(n||0));
 const int=n=>new Intl.NumberFormat("pt-PT",{maximumFractionDigits:0}).format(Number(n||0));
-const today=()=>new Date().toISOString().slice(0,10);
+const today=()=>new Date().toLocaleDateString("sv-SE",{timeZone:"Europe/Lisbon"});
 const initials=n=>String(n||"?").trim().split(/\s+/).slice(0,2).map(x=>x[0]?.toUpperCase()).join("")||"?";
 const safeSlug=v=>String(v||"").trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,"");
 const logo=(url,name,cls="profile-logo")=>`<div class="${cls}">${url?`<img src="${esc(url)}" alt="${esc(name)}">`:esc(initials(name))}</div>`;
@@ -78,7 +78,7 @@ async function renderUserLogin(handle){
   document.getElementById("back").onclick=renderChooser;
   document.getElementById("uEnter").onclick=async()=>{const msg=document.getElementById("loginMsg");hide(msg);const password=document.getElementById("uPass").value,email=`${p.login_handle}@users.luckymanager.local`;const {data,error}=await supabase.auth.signInWithPassword({email,password});if(error)return show(msg,"Palavra-passe incorreta.","error");state.session=data.session;if(!await restoreSession())show(msg,"Utilizador desativado ou sem acesso.","error")};
 }
-async function logout(){await supabase.auth.signOut();state.session=null;state.access=null;state.workspace=null;state.page="dashboard";await loadDirectory();renderChooser()}
+async function logout(){await supabase.auth.signOut();state.session=null;state.access=null;state.workspace=null;state.page="dashboard";state.ordersView="pending";state.ordersSupplierFilter="all";state.ordersStatusFilter="all";state.ordersQuery="";await loadDirectory();renderChooser()}
 
 async function loadWorkspaceData(){
   const id=state.workspace.id;
@@ -174,6 +174,9 @@ function renderDashboard(t){
   const supplierItems=state.items.filter(i=>monthOrderIds.has(i.order_id)&&i.source==="purchased");
   const supplierPaid=supplierItems.filter(i=>i.supplier_paid).reduce((a,i)=>a+Number(i.quantity||0)*Number(i.purchase_price||0),0);
   const supplierUnpaid=supplierItems.filter(i=>!i.supplier_paid).reduce((a,i)=>a+Number(i.quantity||0)*Number(i.purchase_price||0),0);
+  const allUnpaid=state.items.filter(i=>i.source==="purchased"&&!i.supplier_paid);
+  const totalUnpaid=supplierCost(allUnpaid);
+  const pendingOrders=new Set(allUnpaid.map(i=>i.order_id)).size;
   const label=monthLabel(month);
 
   t.innerHTML=`
@@ -197,9 +200,9 @@ function renderDashboard(t){
         <div class="stat-note">${esc(label)}</div>
       </div>
       <div class="stat">
-        <div class="stat-label">Resultado real</div>
+        <div class="stat-label">Resultado do mês</div>
         <div class="stat-value ${real>=0?"good":"bad"}">${eur(real)}</div>
-        <div class="stat-note">despesas e compras de stock incluídas</div>
+        <div class="stat-note">inclui produtos ainda por pagar, despesas e compras de stock</div>
       </div>
       <div class="stat">
         <div class="stat-label">Stock em casa</div>
@@ -218,8 +221,10 @@ function renderDashboard(t){
       <div class="soft-card"><div class="stat-label">Entregues</div><div class="stat-value good">${delivered}</div></div>
       <div class="soft-card"><div class="stat-label">Devolvidas</div><div class="stat-value bad">${returned}</div></div>
       <div class="soft-card supplier-paid-card"><div class="stat-label">Pago a fornecedores</div><div class="stat-value good">${eur(supplierPaid)}</div><div class="stat-note">encomendas deste mês</div></div>
-      <div class="soft-card supplier-unpaid-card"><div class="stat-label">Por pagar a fornecedores</div><div class="stat-value ${supplierUnpaid>0?"bad":""}">${eur(supplierUnpaid)}</div><div class="stat-note">encomendas deste mês</div></div>
+      <div class="soft-card supplier-unpaid-card"><div class="stat-label">Por pagar neste mês</div><div class="stat-value ${supplierUnpaid>0?"bad":""}">${eur(supplierUnpaid)}</div><div class="stat-note">encomendas deste mês</div></div>
     </div>
+
+    ${can("orders")?`<section class="card dashboard-pending"><div><span class="eyebrow">TODOS OS MESES</span><h2>${eur(totalUnpaid)} por pagar a fornecedores</h2><p>${pendingOrders} ${pendingOrders===1?"encomenda":"encomendas"} com produtos por pagar.</p></div><button class="btn" id="openPendingOrders">Ver o que falta pagar →</button></section>`:""}
 
     <div class="two-col" style="margin-top:16px">
       <section class="card">
@@ -261,7 +266,8 @@ function renderDashboard(t){
     state.dashboardMonth=today().slice(0,7);
     renderDashboard(document.getElementById("page"));
   };
-  document.getElementById("allOrders")?.addEventListener("click",()=>go("orders"));
+  document.getElementById("allOrders")?.addEventListener("click",()=>{state.ordersView="month";state.ordersMonth=month;go("orders")});
+  document.getElementById("openPendingOrders")?.addEventListener("click",()=>{state.ordersView="pending";go("orders")});
   document.getElementById("quickOrder")?.addEventListener("click",()=>go("new-order"));
   document.getElementById("quickStock")?.addEventListener("click",()=>go("stock"));
 }
@@ -570,7 +576,7 @@ async function saveCatalogStockEntry(container,p){
 function renderStock(t){
   t.innerHTML=`${pageHead("Stock","O que existe fisicamente neste espaço")}<div class="two-col"><section class="card"><div class="section-head"><h2>Stock atual</h2><span class="spacer"></span><input class="search" id="stockSearch" placeholder="Pesquisar produto, tamanho ou código"></div><div id="stockList"></div></section><section class="card"><div class="section-head"><h2>Adicionar stock</h2></div><div class="grid"><label>Produto<input id="stProduct" placeholder="Ex.: ADIDAS SAMBA"></label><div class="grid grid-2"><label>Tamanho<input id="stSize" placeholder="38 / M"></label><label>Quantidade<input id="stQty" type="number" min="1" value="1"></label></div><label>Preço de compra / unidade (€)<input id="stCost" type="number" min="0" step="0.01" value="0"></label><label>Código de barras<input id="stBarcode" placeholder="Opcional"></label><div class="btn-row"><button class="btn btn-light" id="genBarcode">Gerar código</button><button class="btn" id="saveStock">Guardar</button></div><div id="stockMsg" class="notice" hidden></div></div></section></div>`;
   const search=document.getElementById("stockSearch");
-  const draw=()=>{const q=search.value.trim().toLowerCase();const list=state.stock.filter(x=>Number(x.quantity)>0&&(!q||[x.product_name,x.size,x.barcode].join(" ").toLowerCase().includes(q)));document.getElementById("stockList").innerHTML=list.length?`<div class="stock-grid">${list.map(x=>`<div class="stock-row"><div class="stock-name"><strong>${esc(x.product_name)}</strong><small>${esc(x.size||"Sem tamanho")} ${x.barcode?`· <span class="barcode">${esc(x.barcode)}</span>`:""}</small></div><div class="stock-qty">${int(x.quantity)}</div><div class="stock-cost">${eur(x.unit_cost)}</div><div class="stock-actions"><button class="icon-btn" data-dec="${x.id}">−</button><button class="icon-btn" data-add="${x.id}">+</button><button class="btn btn-light" data-set="${x.id}">Qtd.</button><button class="btn btn-light" data-edit-stock="${x.id}">Editar</button></div></div>`).join("")}</div>`:`<div class="empty">Nenhum stock encontrado.</div>`;document.querySelectorAll("[data-dec]").forEach(b=>b.onclick=()=>changeStock(b.dataset.dec,-1));document.querySelectorAll("[data-add]").forEach(b=>b.onclick=()=>changeStock(b.dataset.add,1));document.querySelectorAll("[data-set]").forEach(b=>b.onclick=()=>setStock(b.dataset.set));document.querySelectorAll("[data-edit-stock]").forEach(b=>b.onclick=()=>openEditStock(b.dataset.editStock))};
+  const draw=()=>{const q=search.value.trim().toLowerCase();const list=state.stock.filter(x=>!q||[x.product_name,x.size,x.barcode].join(" ").toLowerCase().includes(q));document.getElementById("stockList").innerHTML=list.length?`<div class="stock-grid">${list.map(x=>`<div class="stock-row"><div class="stock-name"><strong>${esc(x.product_name)}</strong><small>${esc(x.size||"Sem tamanho")} ${x.barcode?`· <span class="barcode">${esc(x.barcode)}</span>`:""}</small></div><div class="stock-qty">${int(x.quantity)}</div><div class="stock-cost">${eur(x.unit_cost)}</div><div class="stock-actions"><button class="icon-btn" data-dec="${x.id}">−</button><button class="icon-btn" data-add="${x.id}">+</button><button class="btn btn-light" data-set="${x.id}">Qtd.</button><button class="btn btn-light" data-edit-stock="${x.id}">Editar</button></div></div>`).join("")}</div>`:`<div class="empty">Nenhum stock encontrado.</div>`;document.querySelectorAll("[data-dec]").forEach(b=>b.onclick=()=>changeStock(b.dataset.dec,-1));document.querySelectorAll("[data-add]").forEach(b=>b.onclick=()=>changeStock(b.dataset.add,1));document.querySelectorAll("[data-set]").forEach(b=>b.onclick=()=>setStock(b.dataset.set));document.querySelectorAll("[data-edit-stock]").forEach(b=>b.onclick=()=>openEditStock(b.dataset.editStock))};
   search.oninput=draw;draw();
   document.getElementById("genBarcode").onclick=()=>{const p=(state.workspace.slug||"").startsWith("verseline")?"VE":"ST";document.getElementById("stBarcode").value=`${p}-${Date.now().toString().slice(-8)}-${Math.random().toString(36).slice(2,5).toUpperCase()}`};
   document.getElementById("saveStock").onclick=async()=>{const msg=document.getElementById("stockMsg");hide(msg);const product_name=document.getElementById("stProduct").value.trim(),size=document.getElementById("stSize").value.trim()||null,quantity=Math.max(1,Number(document.getElementById("stQty").value||1)),unit_cost=Math.max(0,Number(document.getElementById("stCost").value||0)),barcode=document.getElementById("stBarcode").value.trim()||null;if(!product_name)return show(msg,"Escreve o nome do produto.","error");const {data:created,error}=await supabase.from("stock_items").insert({workspace_id:state.workspace.id,product_name,size,quantity,initial_quantity:quantity,unit_cost,origin:"Compra manual",barcode}).select().single();
@@ -712,7 +718,7 @@ async function saveOrder(){
   }));const {error:itemErr}=await supabase.from("order_items").insert(rows);if(itemErr){await supabase.from("orders").delete().eq("id",order.id);return show(msg,"Não foi possível guardar os produtos.","error")}
   if(status==="Em trânsito"||status==="Entregue")for(const [id,qty] of usage){const st=state.stock.find(x=>x.id===id);const {error:se}=await supabase.from("stock_items").update({quantity:Number(st.quantity)-qty,updated_at:new Date().toISOString()}).eq("id",id).eq("quantity",st.quantity);if(se)return show(msg,"Encomenda criada, mas o stock mudou entretanto. Confere o stock antes de continuar.","error")}
   if(status==="Devolvido")for(const it of items.filter(x=>x.source==="purchased"))await supabase.from("stock_items").insert({workspace_id:state.workspace.id,product_name:it.product_name,size:it.size||null,quantity:it.qty,initial_quantity:it.qty,unit_cost:it.purchase,origin:"Devolução",source_order_id:order.id});
-  await loadWorkspaceData();await recalcDate(order_date);await loadWorkspaceData();go("orders");
+  await loadWorkspaceData();await recalcDate(order_date);await loadWorkspaceData();state.ordersView="month";state.ordersMonth=order_date.slice(0,7);state.ordersSupplierFilter="all";state.ordersStatusFilter="all";state.ordersQuery="";go("orders");
 }
 async function recalcDate(date){const orders=state.orders.filter(o=>o.order_date===date),spend=state.meta.filter(x=>x.spend_date===date).reduce((a,x)=>a+Number(x.amount||0),0),eligible=orders.filter(x=>x.channel!=="Vinted"),per=eligible.length?spend/eligible.length:0;for(const o of orders){const items=state.items.filter(i=>i.order_id===o.id),cost=items.reduce((a,i)=>a+(i.source==="purchased"?Number(i.quantity)*Number(i.purchase_price):0),0),sale=items.reduce((a,i)=>a+Number(i.quantity)*Number(i.sale_price),0),meta=o.channel==="Vinted"?0:per,revenue=o.status==="Entregue"?sale:0,result=revenue-cost-Number(o.shipping_out||0)-Number(o.shipping_return||0)-meta;await supabase.from("orders").update({meta_cost:meta,revenue,result,updated_at:new Date().toISOString()}).eq("id",o.id)}}
 function allowedNext(s){if(s==="Cancelado antes envio")return["Cancelado antes envio","Em trânsito","Entregue"];if(s==="Em trânsito")return["Em trânsito","Entregue","Devolvido"];if(s==="Entregue")return["Entregue","Devolvido"];return["Devolvido"]}
@@ -733,7 +739,10 @@ function supplierCost(items,paidState=null){
 async function toggleSupplierPayment(itemId,nextPaid){
   const item=state.items.find(i=>i.id===itemId);
   if(!item||item.source!=="purchased")return;
-  if(!nextPaid&&!confirm("Marcar este produto novamente como POR PAGAR?"))return;
+  const amount=Number(item.quantity||0)*Number(item.purchase_price||0);
+  if(!confirm(nextPaid?`Confirmas que pagaste ${eur(amount)} ao fornecedor por ${item.product_name}?`:`Marcar ${item.product_name} novamente como POR PAGAR (${eur(amount)})?`))return;
+  const buttons=[...document.querySelectorAll("[data-supplier-pay]")].filter(b=>b.dataset.supplierPay===item.id);
+  buttons.forEach(b=>b.disabled=true);
 
   const {error}=await supabase.rpc("set_supplier_paid",{
     p_order_item_id:item.id,
@@ -741,7 +750,7 @@ async function toggleSupplierPayment(itemId,nextPaid){
     p_supplier_name:item.supplier_name||null,
     p_note:null
   });
-  if(error)return alert("Não foi possível atualizar o pagamento: "+error.message);
+  if(error){buttons.forEach(b=>b.disabled=false);return alert("Não foi possível atualizar o pagamento: "+error.message)}
 
   await loadWorkspaceData();
   renderOrders(document.getElementById("page"));
@@ -750,39 +759,55 @@ async function toggleSupplierPayment(itemId,nextPaid){
 function renderOrders(t){
   const month=state.ordersMonth||today().slice(0,7);
   state.ordersMonth=month;
+  const allBought=state.items.filter(i=>i.source==="purchased");
+  const unpaidItems=allBought.filter(i=>!i.supplier_paid);
+  const unpaidOrderIds=new Set(unpaidItems.map(i=>i.order_id));
 
   t.innerHTML=`
-    ${pageHead("Encomendas","Controla encomendas e pagamentos aos fornecedores num só sítio.",`<button class="btn" id="newOrderBtn">+ Nova encomenda</button>`)}
+    ${pageHead("Encomendas","Vê o que falta pagar, encontra encomendas e corrige os dados no mesmo lugar.",can("new-order")?`<button class="btn" id="newOrderBtn">+ Nova encomenda</button>`:"")}
+
+    <section class="card payables-hero" aria-label="Resumo dos pagamentos a fornecedores">
+      <div class="payables-amount"><span class="eyebrow">POR PAGAR · TODOS OS MESES</span><strong>${eur(supplierCost(unpaidItems))}</strong><small>${unpaidOrderIds.size} ${unpaidOrderIds.size===1?"encomenda":"encomendas"} · ${unpaidItems.length} ${unpaidItems.length===1?"produto":"produtos"} por pagar</small></div>
+      <div class="payables-secondary"><span>Já pago a fornecedores</span><strong>${eur(supplierCost(allBought,true))}</strong><small>Compras registadas em encomendas</small></div>
+      <div class="payables-explain">O custo do produto entra no resultado da encomenda mesmo antes de pagares ao fornecedor. Marca o pagamento no produto certo depois de pagares.</div>
+    </section>
+
+    <div class="orders-view-tabs" role="group" aria-label="Ver encomendas">
+      <button type="button" class="orders-view-tab ${state.ordersView==="pending"?"active":""}" data-orders-view="pending">Por pagar <span>${unpaidOrderIds.size}</span></button>
+      <button type="button" class="orders-view-tab ${state.ordersView==="month"?"active":""}" data-orders-view="month">Por mês</button>
+      <button type="button" class="orders-view-tab ${state.ordersView==="all"?"active":""}" data-orders-view="all">Todas</button>
+    </div>
 
     <section class="card work-orders-toolbar">
       <div class="orders-filter-grid">
-        <label>Mês
+        <label id="ordersMonthWrap" ${state.ordersView==="month"?"":"hidden"}>Mês da encomenda
           <input id="ordersMonth" type="month" value="${esc(month)}">
         </label>
-        <label>Fornecedor
+        <label id="supplierFilterWrap" ${state.ordersView==="pending"?"hidden":""}>Pagamento ao fornecedor
           <select id="supplierFilter">
-            <option value="all">Todos</option>
-            <option value="unpaid">Por pagar</option>
-            <option value="paid">Pagos</option>
-            <option value="stock">Só artigos do stock</option>
+            <option value="all" ${state.ordersSupplierFilter==="all"?"selected":""}>Todos</option>
+            <option value="unpaid" ${state.ordersSupplierFilter==="unpaid"?"selected":""}>Por pagar</option>
+            <option value="paid" ${state.ordersSupplierFilter==="paid"?"selected":""}>Pagos</option>
+            <option value="stock" ${state.ordersSupplierFilter==="stock"?"selected":""}>Só artigos do stock</option>
           </select>
         </label>
         <label>Estado
           <select id="orderStatusFilter">
             <option value="all">Todos os estados</option>
-            ${STATUSES.map(s=>`<option value="${esc(s)}">${esc(s)}</option>`).join("")}
+            ${STATUSES.map(s=>`<option value="${esc(s)}" ${state.ordersStatusFilter===s?"selected":""}>${esc(s)}</option>`).join("")}
           </select>
         </label>
         <label>Pesquisar
-          <input id="orderSearch" placeholder="Nº, produto, fornecedor...">
+          <input id="orderSearch" value="${esc(state.ordersQuery)}" placeholder="Nº, produto, tamanho ou fornecedor...">
         </label>
       </div>
     </section>
 
     <div id="supplierSummary"></div>
+    <div class="orders-results-head"><h2 id="ordersListTitle"></h2><span id="ordersListCount" class="muted"></span></div>
     <div id="orderList" class="grid"></div>`;
 
-  document.getElementById("newOrderBtn").onclick=()=>go("new-order");
+  document.getElementById("newOrderBtn")?.addEventListener("click",()=>go("new-order"));
   const monthInput=document.getElementById("ordersMonth");
   const supplierFilter=document.getElementById("supplierFilter");
   const statusFilter=document.getElementById("orderStatusFilter");
@@ -792,27 +817,30 @@ function renderOrders(t){
     const selectedMonth=monthInput.value||month;
     state.ordersMonth=selectedMonth;
     const q=search.value.toLowerCase().trim();
+    state.ordersQuery=search.value;
+    state.ordersSupplierFilter=supplierFilter.value;
+    state.ordersStatusFilter=statusFilter.value;
 
     const monthOrders=state.orders.filter(o=>String(o.order_date).startsWith(selectedMonth));
     const monthIds=new Set(monthOrders.map(o=>o.id));
     const monthBought=state.items.filter(i=>monthIds.has(i.order_id)&&i.source==="purchased");
-    const totalSupplier=supplierCost(monthBought);
-    const paidSupplier=supplierCost(monthBought,true);
-    const unpaidSupplier=supplierCost(monthBought,false);
-
-    document.getElementById("supplierSummary").innerHTML=`
+    const scope=state.ordersView;
+    document.getElementById("ordersMonthWrap").hidden=scope!=="month";
+    document.getElementById("supplierFilterWrap").hidden=scope==="pending";
+    document.getElementById("supplierSummary").innerHTML=scope==="month"?`
       <div class="supplier-summary">
-        <div class="supplier-kpi"><span>Encomendas do mês</span><strong>${monthOrders.length}</strong></div>
-        <div class="supplier-kpi"><span>Custo fornecedor</span><strong>${eur(totalSupplier)}</strong></div>
-        <div class="supplier-kpi paid"><span>Já pago</span><strong>${eur(paidSupplier)}</strong></div>
-        <div class="supplier-kpi unpaid"><span>Por pagar</span><strong>${eur(unpaidSupplier)}</strong></div>
-      </div>`;
+        <div class="supplier-kpi"><span>Encomendas em ${esc(monthLabel(selectedMonth))}</span><strong>${monthOrders.length}</strong></div>
+        <div class="supplier-kpi"><span>Custo dos produtos comprados</span><strong>${eur(supplierCost(monthBought))}</strong></div>
+        <div class="supplier-kpi paid"><span>Já pago ao fornecedor</span><strong>${eur(supplierCost(monthBought,true))}</strong></div>
+        <div class="supplier-kpi unpaid"><span>Por pagar ao fornecedor</span><strong>${eur(supplierCost(monthBought,false))}</strong></div>
+      </div>`:"";
 
-    const list=monthOrders.filter(o=>{
+    const base=scope==="month"?monthOrders:scope==="pending"?state.orders.filter(o=>unpaidOrderIds.has(o.id)):state.orders;
+    const list=base.filter(o=>{
       const items=state.items.filter(i=>i.order_id===o.id);
       const supplierState=supplierStateForOrder(items);
 
-      if(supplierFilter.value!=="all"&&supplierState.key!==supplierFilter.value)return false;
+      if(scope!=="pending"&&supplierFilter.value!=="all"&&supplierState.key!==supplierFilter.value)return false;
       if(statusFilter.value!=="all"&&o.status!==statusFilter.value)return false;
 
       if(q){
@@ -823,6 +851,9 @@ function renderOrders(t){
       }
       return true;
     });
+    list.sort((a,b)=>scope==="pending"?String(a.order_date).localeCompare(String(b.order_date)):String(b.order_date).localeCompare(String(a.order_date)));
+    document.getElementById("ordersListTitle").textContent=scope==="pending"?"Produtos por pagar · de todos os meses":scope==="month"?`Encomendas de ${monthLabel(selectedMonth)}`:"Todas as encomendas";
+    document.getElementById("ordersListCount").textContent=`${list.length} ${list.length===1?"encomenda":"encomendas"}${scope==="pending"?" · mais antigas primeiro":""}`;
 
     document.getElementById("orderList").innerHTML=list.length?list.map(o=>{
       const items=state.items.filter(i=>i.order_id===o.id);
@@ -832,16 +863,16 @@ function renderOrders(t){
 
       return `<article class="order-card work-order-card">
         <div class="order-top">
-          <strong>${esc(o.order_ref)}</strong>
-          <span class="badge">${esc(o.channel)}</span>
+          <strong class="order-reference">${esc(o.order_ref)}</strong>
+          <span class="badge">${esc(o.status)}</span>
           <span class="badge supplier-status ${supplierState.className}">${esc(supplierState.label)}</span>
-          <span class="muted">${esc(o.order_date)}</span>
+          <span class="muted">${esc(o.order_date)} · ${esc(o.channel)}</span>
           <span class="spacer"></span>
-          <strong class="${Number(o.result)>=0?"good":"bad"}">${eur(o.result)}</strong>
+          <span class="order-result"><small>Resultado da encomenda</small><strong class="${Number(o.result)>=0?"good":"bad"}">${eur(o.result)}</strong></span>
         </div>
 
         <div class="order-products supplier-products">
-          ${items.map(i=>{
+          ${[...items].sort((a,b)=>Number(a.supplier_paid)-Number(b.supplier_paid)).map(i=>{
             if(i.source==="stock"){
               return `<div class="supplier-item stock-source">
                 <div><strong>${i.quantity}× ${esc(i.product_name)}</strong> · ${esc(i.size||"-")}</div>
@@ -852,7 +883,7 @@ function renderOrders(t){
             return `<div class="supplier-item ${i.supplier_paid?"is-paid":"is-unpaid"}">
               <div class="supplier-item-main">
                 <strong>${i.quantity}× ${esc(i.product_name)}</strong> · ${esc(i.size||"-")}
-                <small>Fornecedor: ${esc(i.supplier_name||"Não indicado")} · ${eur(amount)}</small>
+                <small>Fornecedor: ${esc(i.supplier_name||"Não indicado — edita a encomenda")} · Custo total ${eur(amount)}${i.supplier_paid_at&&i.supplier_paid?` · Pago em ${esc(new Date(i.supplier_paid_at).toLocaleDateString("pt-PT",{timeZone:"Europe/Lisbon"}))}`:""}</small>
               </div>
               <span class="badge supplier-status ${i.supplier_paid?"paid":"unpaid"}">${i.supplier_paid?"PAGO":"POR PAGAR"}</span>
               <button class="btn ${i.supplier_paid?"btn-light":"btn-success"} btn-small" data-supplier-pay="${i.id}" data-next-paid="${i.supplier_paid?"0":"1"}">
@@ -864,14 +895,14 @@ function renderOrders(t){
 
         <div class="order-finance-line">
           <span>Venda ${eur(items.reduce((a,i)=>a+Number(i.quantity||0)*Number(i.sale_price||0),0))}</span>
-          <span>Fornecedor ${eur(orderSupplierTotal)}</span>
+          <span>Custo fornecedor ${eur(orderSupplierTotal)}</span>
           ${orderUnpaid>0?`<strong class="bad">Falta pagar ${eur(orderUnpaid)}</strong>`:`${orderSupplierTotal>0?`<strong class="good">Fornecedor pago</strong>`:""}`}
           <span>Portes ${eur(Number(o.shipping_out)+Number(o.shipping_return))}</span>
           <span>Meta ${eur(o.meta_cost)}</span>
         </div>
 
         <div class="btn-row order-actions-row">
-          <button class="btn btn-light" data-edit-order="${o.id}">Editar</button>
+          <button class="btn btn-light" data-edit-order="${o.id}">Editar encomenda</button>
           <label style="min-width:220px">Estado
             <select data-order-status="${o.id}" ${o.status==="Devolvido"?"disabled":""}>
               ${allowedNext(o.status).map(s=>`<option ${s===o.status?"selected":""}>${s}</option>`).join("")}
@@ -879,13 +910,18 @@ function renderOrders(t){
           </label>
         </div>
       </article>`;
-    }).join(""):`<div class="card empty">Não existem encomendas com estes filtros.</div>`;
+    }).join(""):`<div class="card empty">${scope==="pending"&&!unpaidOrderIds.size?"Está tudo pago aos fornecedores. As encomendas continuam disponíveis em Por mês e Todas.":scope==="month"&&!monthOrders.length?`Não há encomendas em ${esc(monthLabel(selectedMonth))}. Escolhe outro mês ou abre Por pagar para ver pendentes de outros meses.`:"Não há encomendas com estes filtros. Limpa a pesquisa ou escolhe outro estado."}</div>`;
 
     document.querySelectorAll("[data-order-status]").forEach(s=>s.onchange=()=>changeOrderStatus(s.dataset.orderStatus,s.value));
     document.querySelectorAll("[data-edit-order]").forEach(b=>b.onclick=()=>openEditOrder(b.dataset.editOrder));
     document.querySelectorAll("[data-supplier-pay]").forEach(b=>b.onclick=()=>toggleSupplierPayment(b.dataset.supplierPay,b.dataset.nextPaid==="1"));
   };
 
+  document.querySelectorAll("[data-orders-view]").forEach(button=>button.onclick=()=>{
+    state.ordersView=button.dataset.ordersView;
+    state.ordersSupplierFilter="all";
+    renderOrders(t);
+  });
   monthInput.onchange=draw;
   supplierFilter.onchange=draw;
   statusFilter.onchange=draw;
@@ -1076,6 +1112,7 @@ function openEditOrder(id){
       if(order_date!==oldDate)await recalcDate(order_date);
       await loadWorkspaceData();
       close();
+      if(state.ordersView==="month")state.ordersMonth=order_date.slice(0,7);
       renderOrders(document.getElementById("page"));
     }catch(e){
       const text=String(e.message||e);
