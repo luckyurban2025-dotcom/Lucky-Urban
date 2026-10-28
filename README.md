@@ -1,4 +1,4 @@
-# Lucky Manager v4 — Admin só Utilizadores
+# Lucky Urban Manager
 
 - O Administrador só cria/edita/apaga utilizadores.
 - O Admin não abre Lucky Urban, Verseline, Stock, Encomendas, Meta ou Despesas.
@@ -81,3 +81,26 @@ Substitui `index.html`, `app.js`, `styles.css` e `README.md` na raiz do reposit�
 - Exemplo: `AIR FORCE LV` tamanho `41` com 1 unidade numa entrada e 0 noutra aparece uma única vez com quantidade 1.
 - Os botões `+`, `−`, `Qtd.` e `Editar` trabalham sobre a quantidade reunida. O histórico das entradas originais e das devoluções mantém-se na base de dados.
 - A escolha de artigo ao criar ou editar uma encomenda também apresenta cada nome/tamanho uma só vez.
+
+## v8 — Stock disponível e dívida editável
+- **Stock atual** mostra por defeito só artigos com quantidade positiva. Para corrigir um artigo esgotado, ativa **Mostrar artigos esgotados**; não se apaga nenhum produto nem o respetivo histórico.
+- **Encomendas → Por pagar** mostra o que falta pagar em todos os meses. Em cada produto comprado vês o custo, o valor já pago e o saldo em dívida.
+- **Alterar dívida** permite escrever o valor que falta pagar, entre zero e o custo do produto. Exemplo: custo de 17 €, escreves 7 € por pagar; o painel mostra 10 € já pagos. Podes corrigir esse saldo novamente.
+- **Marcar pago** paga apenas o saldo restante. **Marcar por pagar** volta a colocar o total em dívida. Para corrigir o próprio custo do produto, usa **Editar encomenda**.
+- No editor da encomenda, **Já pago ao fornecedor (€)** mantém pagamentos parciais quando alteras produto, quantidade ou custo. O valor já pago não pode ultrapassar o novo custo total.
+- O resultado da encomenda continua a incluir o custo total do produto; alterar o saldo em dívida não mexe no lucro.
+
+### Atualização v8
+1. A migração `supplier_balance_v8.sql` já foi aplicada ao projeto Supabase ligado ao site. O ficheiro SQL no pacote serve para consulta e histórico; **não é necessário voltar a executá-lo**.
+2. Na raiz do repositório `Lucky-Urban`, substitui `index.html`, `app.js`, `styles.css` e `README.md`. Mantém o `config.js` existente e não carregues o ficheiro SQL na raiz do GitHub.
+3. Depois do deploy automático do Render, atualiza a página. Em **Stock**, os artigos a zero ficam ocultos até ativares o respetivo controlo; em **Encomendas**, usa **Alterar dívida** no produto.
+
+## v8.1 — Editar o total em dívida
+- O valor grande em **Encomendas → Por pagar** e no **Início** usa agora a soma do que realmente falta pagar por produto. Um produto de 17 € com 10 € já pagos acrescenta **7 €**, não 17 €, ao total.
+- **Editar total** permite escrever diretamente quanto falta pagar no conjunto. Exemplo: a soma dos produtos é 100 €, mas sabes que deves 80 €; escreves 80 € e o painel mostra um **ajuste manual de −20 €** ao lado da soma.
+- O ajuste pertence apenas ao espaço atual. Não muda o custo, os pagamentos nem o resultado de cada encomenda. Quando os saldos por produto mudarem, o total volta a ser calculado com o mesmo ajuste; podes voltar a corrigir ou escolher **Usar soma dos produtos**.
+- Se não houver nenhum produto pendente e o total manual continuar positivo, a lista avisa que esse valor é um ajuste manual sem produto associado.
+- A migração `supplier_total_v8_1.sql` já foi aplicada ao projeto Supabase do site. Os dois ficheiros SQL neste pacote são para histórico; **não os voltes a executar**.
+
+### Publicar v8.1
+Extrai o ZIP e substitui apenas `index.html`, `app.js`, `styles.css` e `README.md` na raiz do ramo `main` de `Lucky-Urban`. Mantém `config.js` e os dados existentes. O Render publica depois do commit quando o deploy automático está ativo.

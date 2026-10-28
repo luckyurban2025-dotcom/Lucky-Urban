@@ -172,10 +172,11 @@ function renderDashboard(t){
   const monthOrders=[...orders].sort((a,b)=>String(b.order_date).localeCompare(String(a.order_date))).slice(0,5);
   const monthOrderIds=new Set(orders.map(o=>o.id));
   const supplierItems=state.items.filter(i=>monthOrderIds.has(i.order_id)&&i.source==="purchased");
-  const supplierPaid=supplierItems.filter(i=>i.supplier_paid).reduce((a,i)=>a+Number(i.quantity||0)*Number(i.purchase_price||0),0);
-  const supplierUnpaid=supplierItems.filter(i=>!i.supplier_paid).reduce((a,i)=>a+Number(i.quantity||0)*Number(i.purchase_price||0),0);
-  const allUnpaid=state.items.filter(i=>i.source==="purchased"&&!i.supplier_paid);
-  const totalUnpaid=supplierCost(allUnpaid);
+  const supplierPaid=supplierCost(supplierItems,true);
+  const supplierUnpaid=supplierCost(supplierItems,false);
+  const allUnpaid=state.items.filter(i=>i.source==="purchased"&&supplierDue(i)>0);
+  const totalUnpaid=supplierTotalDue();
+  const itemizedUnpaid=supplierCost(allUnpaid,false);
   const pendingOrders=new Set(allUnpaid.map(i=>i.order_id)).size;
   const label=monthLabel(month);
 
@@ -224,7 +225,7 @@ function renderDashboard(t){
       <div class="soft-card supplier-unpaid-card"><div class="stat-label">Por pagar neste mês</div><div class="stat-value ${supplierUnpaid>0?"bad":""}">${eur(supplierUnpaid)}</div><div class="stat-note">encomendas deste mês</div></div>
     </div>
 
-    ${can("orders")?`<section class="card dashboard-pending"><div><span class="eyebrow">TODOS OS MESES</span><h2>${eur(totalUnpaid)} por pagar a fornecedores</h2><p>${pendingOrders} ${pendingOrders===1?"encomenda":"encomendas"} com produtos por pagar.</p></div><button class="btn" id="openPendingOrders">Ver o que falta pagar →</button></section>`:""}
+    ${can("orders")?`<section class="card dashboard-pending"><div><span class="eyebrow">TODOS OS MESES</span><h2>${eur(totalUnpaid)} por pagar a fornecedores</h2><p>${pendingOrders} ${pendingOrders===1?"encomenda":"encomendas"} com produtos por pagar.${supplierAdjustment()?` Soma das encomendas: ${eur(itemizedUnpaid)} · Ajuste manual: ${signedEur(supplierAdjustment())}.`:""}</p></div><div class="btn-row"><button class="btn btn-light" id="editDashboardSupplierTotal">Editar total</button><button class="btn" id="openPendingOrders">Ver o que falta pagar →</button></div></section>`:""}
 
     <div class="two-col" style="margin-top:16px">
       <section class="card">
@@ -268,6 +269,7 @@ function renderDashboard(t){
   };
   document.getElementById("allOrders")?.addEventListener("click",()=>{state.ordersView="month";state.ordersMonth=month;go("orders")});
   document.getElementById("openPendingOrders")?.addEventListener("click",()=>{state.ordersView="pending";go("orders")});
+  document.getElementById("editDashboardSupplierTotal")?.addEventListener("click",openSupplierTotal);
   document.getElementById("quickOrder")?.addEventListener("click",()=>go("new-order"));
   document.getElementById("quickStock")?.addEventListener("click",()=>go("stock"));
 }
@@ -595,10 +597,11 @@ function stockGroupForId(id){
 }
 
 function renderStock(t){
-  t.innerHTML=`${pageHead("Stock","O que existe fisicamente neste espaço")}<div class="two-col"><section class="card"><div class="section-head"><h2>Stock atual</h2><span class="spacer"></span><input class="search" id="stockSearch" placeholder="Pesquisar produto, tamanho ou código"></div><div id="stockList"></div></section><section class="card"><div class="section-head"><h2>Adicionar stock</h2></div><div class="grid"><label>Produto<input id="stProduct" placeholder="Ex.: ADIDAS SAMBA"></label><div class="grid grid-2"><label>Tamanho<input id="stSize" placeholder="38 / M"></label><label>Quantidade<input id="stQty" type="number" min="1" value="1"></label></div><label>Preço de compra / unidade (€)<input id="stCost" type="number" min="0" step="0.01" value="0"></label><label>Código de barras<input id="stBarcode" placeholder="Opcional"></label><div class="btn-row"><button class="btn btn-light" id="genBarcode">Gerar código</button><button class="btn" id="saveStock">Guardar</button></div><div id="stockMsg" class="notice" hidden></div></div></section></div>`;
+  t.innerHTML=`${pageHead("Stock","O que existe fisicamente neste espaço")}<div class="two-col"><section class="card"><div class="section-head"><h2>Stock atual</h2><span class="spacer"></span><input class="search" id="stockSearch" placeholder="Pesquisar produto, tamanho ou código"></div><label class="stock-zero-toggle"><input type="checkbox" id="showZeroStock"> Mostrar artigos esgotados</label><div id="stockList"></div></section><section class="card"><div class="section-head"><h2>Adicionar stock</h2></div><div class="grid"><label>Produto<input id="stProduct" placeholder="Ex.: ADIDAS SAMBA"></label><div class="grid grid-2"><label>Tamanho<input id="stSize" placeholder="38 / M"></label><label>Quantidade<input id="stQty" type="number" min="1" value="1"></label></div><label>Preço de compra / unidade (€)<input id="stCost" type="number" min="0" step="0.01" value="0"></label><label>Código de barras<input id="stBarcode" placeholder="Opcional"></label><div class="btn-row"><button class="btn btn-light" id="genBarcode">Gerar código</button><button class="btn" id="saveStock">Guardar</button></div><div id="stockMsg" class="notice" hidden></div></div></section></div>`;
   const search=document.getElementById("stockSearch");
-  const draw=()=>{const q=search.value.trim().toLowerCase();const list=stockGroups().filter(x=>!q||[x.product_name,x.size,...x.rows.map(r=>r.barcode)].join(" ").toLowerCase().includes(q));document.getElementById("stockList").innerHTML=list.length?`<div class="stock-grid">${list.map(x=>`<div class="stock-row"><div class="stock-name"><strong>${esc(x.product_name)}</strong><small>${esc(x.size||"Sem tamanho")} ${x.barcode?`· <span class="barcode">${esc(x.barcode)}</span>`:""}</small></div><div class="stock-qty">${int(x.quantity)}</div><div class="stock-cost">${eur(x.unit_cost)}</div><div class="stock-actions"><button class="icon-btn" data-dec="${x.id}">−</button><button class="icon-btn" data-add="${x.id}">+</button><button class="btn btn-light" data-set="${x.id}">Qtd.</button><button class="btn btn-light" data-edit-stock="${x.id}">Editar</button></div></div>`).join("")}</div>`:`<div class="empty">Nenhum stock encontrado.</div>`;document.querySelectorAll("[data-dec]").forEach(b=>b.onclick=()=>changeStock(b.dataset.dec,-1));document.querySelectorAll("[data-add]").forEach(b=>b.onclick=()=>changeStock(b.dataset.add,1));document.querySelectorAll("[data-set]").forEach(b=>b.onclick=()=>setStock(b.dataset.set));document.querySelectorAll("[data-edit-stock]").forEach(b=>b.onclick=()=>openEditStock(b.dataset.editStock))};
-  search.oninput=draw;draw();
+  const showZero=document.getElementById("showZeroStock");
+  const draw=()=>{const q=search.value.trim().toLowerCase();const list=stockGroups().filter(x=>(showZero.checked||Number(x.quantity)>0)&&(!q||[x.product_name,x.size,...x.rows.map(r=>r.barcode)].join(" ").toLowerCase().includes(q)));document.getElementById("stockList").innerHTML=list.length?`<div class="stock-grid">${list.map(x=>`<div class="stock-row"><div class="stock-name"><strong>${esc(x.product_name)}</strong><small>${esc(x.size||"Sem tamanho")} ${x.barcode?`· <span class="barcode">${esc(x.barcode)}</span>`:""}</small></div><div class="stock-qty">${int(x.quantity)}</div><div class="stock-cost">${eur(x.unit_cost)}</div><div class="stock-actions"><button class="icon-btn" data-dec="${x.id}">−</button><button class="icon-btn" data-add="${x.id}">+</button><button class="btn btn-light" data-set="${x.id}">Qtd.</button><button class="btn btn-light" data-edit-stock="${x.id}">Editar</button></div></div>`).join("")}</div>`:`<div class="empty">${showZero.checked?"Nenhum artigo encontrado.":"Não há artigos disponíveis. Para corrigir um esgotado, ativa «Mostrar artigos esgotados»."}</div>`;document.querySelectorAll("[data-dec]").forEach(b=>b.onclick=()=>changeStock(b.dataset.dec,-1));document.querySelectorAll("[data-add]").forEach(b=>b.onclick=()=>changeStock(b.dataset.add,1));document.querySelectorAll("[data-set]").forEach(b=>b.onclick=()=>setStock(b.dataset.set));document.querySelectorAll("[data-edit-stock]").forEach(b=>b.onclick=()=>openEditStock(b.dataset.editStock))};
+  search.oninput=draw;showZero.onchange=draw;draw();
   document.getElementById("genBarcode").onclick=()=>{const p=(state.workspace.slug||"").startsWith("verseline")?"VE":"ST";document.getElementById("stBarcode").value=`${p}-${Date.now().toString().slice(-8)}-${Math.random().toString(36).slice(2,5).toUpperCase()}`};
   document.getElementById("saveStock").onclick=async()=>{const msg=document.getElementById("stockMsg");hide(msg);const product_name=document.getElementById("stProduct").value.trim(),size=document.getElementById("stSize").value.trim()||null,quantity=Math.max(1,Number(document.getElementById("stQty").value||1)),unit_cost=Math.max(0,Number(document.getElementById("stCost").value||0)),barcode=document.getElementById("stBarcode").value.trim()||null;if(!product_name)return show(msg,"Escreve o nome do produto.","error");const {data:created,error}=await supabase.from("stock_items").insert({workspace_id:state.workspace.id,product_name,size,quantity,initial_quantity:quantity,unit_cost,origin:"Compra manual",barcode}).select().single();
     if(error)return show(msg,error.code==="23505"?"Esse código de barras já existe.":error.message,"error");
@@ -760,6 +763,7 @@ async function saveOrder(){
     stock_item_id:it.stockId,
     supplier_name:it.source==="purchased"?(it.supplier_name||null):null,
     supplier_paid:it.source==="purchased"?!!it.supplier_paid:false,
+    supplier_amount_paid:it.source==="purchased"&&it.supplier_paid?Math.round(it.qty*it.purchase*100)/100:0,
     supplier_paid_at:it.source==="purchased"&&it.supplier_paid?new Date().toISOString():null
   }));const {error:itemErr}=await supabase.from("order_items").insert(rows);if(itemErr){await supabase.from("orders").delete().eq("id",order.id);return show(msg,"Não foi possível guardar os produtos.","error")}
   if(status==="Em trânsito"||status==="Entregue")for(const [id,qty] of usage){const st=state.stock.find(x=>x.id===id);const {error:se}=await supabase.from("stock_items").update({quantity:Number(st.quantity)-qty,updated_at:new Date().toISOString()}).eq("id",id).eq("quantity",st.quantity);if(se)return show(msg,"Encomenda criada, mas o stock mudou entretanto. Confere o stock antes de continuar.","error")}
@@ -771,21 +775,61 @@ function allowedNext(s){if(s==="Cancelado antes envio")return["Cancelado antes e
 function supplierStateForOrder(items){
   const bought=items.filter(i=>i.source==="purchased");
   if(!bought.length)return {key:"stock",label:"Só stock",className:"neutral"};
-  const unpaid=bought.filter(i=>!i.supplier_paid);
+  const unpaid=bought.filter(i=>supplierDue(i)>0);
   if(!unpaid.length)return {key:"paid",label:"Fornecedor pago",className:"paid"};
   return {key:"unpaid",label:`Por pagar (${unpaid.length})`,className:"unpaid"};
 }
 
+function supplierTotal(item){return Math.round(Number(item.quantity||0)*Number(item.purchase_price||0)*100)/100}
+function supplierPaidAmount(item){
+  const total=supplierTotal(item);
+  const paid=item.supplier_amount_paid==null?(item.supplier_paid?total:0):Number(item.supplier_amount_paid);
+  return Math.min(total,Math.max(0,Math.round(paid*100)/100));
+}
+function supplierDue(item){return Math.max(0,Math.round((supplierTotal(item)-supplierPaidAmount(item))*100)/100)}
 function supplierCost(items,paidState=null){
   return items
-    .filter(i=>i.source==="purchased"&&(paidState===null||!!i.supplier_paid===paidState))
-    .reduce((a,i)=>a+Number(i.quantity||0)*Number(i.purchase_price||0),0);
+    .filter(i=>i.source==="purchased")
+    .reduce((a,i)=>a+(paidState===null?supplierTotal(i):paidState?supplierPaidAmount(i):supplierDue(i)),0);
+}
+function supplierAdjustment(){return Number(state.workspace?.supplier_total_adjustment||0)}
+function supplierTotalDue(){return Math.max(0,Math.round((supplierCost(state.items,false)+supplierAdjustment())*100)/100)}
+function signedEur(amount){return `${amount>=0?"+":"−"}${eur(Math.abs(amount))}`}
+
+function openSupplierTotal(){
+  const itemized=supplierCost(state.items,false);
+  document.body.insertAdjacentHTML("beforeend",`<div class="modal-backdrop" id="supplierTotalModal"><section class="modal supplier-balance-modal">
+    <div class="modal-head"><h2>Quanto falta pagar no total?</h2><span class="spacer"></span><button class="icon-btn" id="closeSupplierTotal" aria-label="Fechar">×</button></div>
+    <p>Soma dos produtos por pagar: <strong>${eur(itemized)}</strong></p>
+    <label>Total em dívida ao fornecedor (€)<input id="supplierTotalInput" type="number" min="0" step="0.01" value="${supplierTotalDue().toFixed(2)}"></label>
+    <p class="muted">O número que escreveres aparece no Início e nas Encomendas. Se diferir da soma dos produtos, mostramos a diferença como ajuste manual. O custo e o pagamento de cada produto não mudam.</p>
+    <div id="supplierTotalMsg" class="notice" hidden></div>
+    <div class="btn-row"><button class="btn btn-light" id="resetSupplierTotal">Usar soma dos produtos</button><button class="btn" id="saveSupplierTotal">Guardar total</button></div>
+  </section></div>`);
+  const close=()=>document.getElementById("supplierTotalModal")?.remove();
+  document.getElementById("closeSupplierTotal").onclick=close;
+  const save=async(value)=>{
+    const due=Number(value);
+    const msg=document.getElementById("supplierTotalMsg");hide(msg);
+    if(value===""||!Number.isFinite(due)||due<0||Math.abs(due*100-Math.round(due*100))>1e-6)
+      return show(msg,"Escreve um total válido, com até duas casas decimais.","error");
+    const buttons=[document.getElementById("saveSupplierTotal"),document.getElementById("resetSupplierTotal")];
+    buttons.forEach(b=>b.disabled=true);
+    const {data,error}=await supabase.rpc("set_supplier_total",{p_workspace_id:state.workspace.id,p_total_due:due});
+    if(error){buttons.forEach(b=>b.disabled=false);return show(msg,"Não foi possível guardar: "+error.message,"error")}
+    state.workspace.supplier_total_adjustment=Number(data.adjustment);
+    await loadWorkspaceData();close();
+    if(state.page==="dashboard")renderDashboard(document.getElementById("page"));
+    else renderOrders(document.getElementById("page"));
+  };
+  document.getElementById("saveSupplierTotal").onclick=()=>save(document.getElementById("supplierTotalInput").value.trim());
+  document.getElementById("resetSupplierTotal").onclick=()=>save(String(itemized));
 }
 
 async function toggleSupplierPayment(itemId,nextPaid){
   const item=state.items.find(i=>i.id===itemId);
   if(!item||item.source!=="purchased")return;
-  const amount=Number(item.quantity||0)*Number(item.purchase_price||0);
+  const amount=nextPaid?supplierDue(item):supplierPaidAmount(item);
   if(!confirm(nextPaid?`Confirmas que pagaste ${eur(amount)} ao fornecedor por ${item.product_name}?`:`Marcar ${item.product_name} novamente como POR PAGAR (${eur(amount)})?`))return;
   const buttons=[...document.querySelectorAll("[data-supplier-pay]")].filter(b=>b.dataset.supplierPay===item.id);
   buttons.forEach(b=>b.disabled=true);
@@ -802,20 +846,52 @@ async function toggleSupplierPayment(itemId,nextPaid){
   renderOrders(document.getElementById("page"));
 }
 
+function openSupplierBalance(itemId){
+  const item=state.items.find(i=>i.id===itemId);
+  if(!item||item.source!=="purchased")return;
+  const total=supplierTotal(item);
+  document.body.insertAdjacentHTML("beforeend",`<div class="modal-backdrop" id="supplierBalanceModal"><section class="modal supplier-balance-modal">
+    <div class="modal-head"><h2>Alterar dívida ao fornecedor</h2><span class="spacer"></span><button class="icon-btn" id="closeSupplierBalance" aria-label="Fechar">×</button></div>
+    <p><strong>${esc(item.product_name)}</strong> · ${esc(item.size||"-")} · ${int(item.quantity)} un.</p>
+    <p>Fornecedor: ${esc(item.supplier_name||"Não indicado")}</p>
+    <div class="supplier-balance-summary"><span>Custo total: <strong>${eur(total)}</strong></span><span>Já pago: <strong>${eur(supplierPaidAmount(item))}</strong></span></div>
+    <label>Quanto falta pagar (€)<input id="supplierAmountDue" type="number" min="0" max="${total}" step="0.01" value="${supplierDue(item).toFixed(2)}"></label>
+    <p class="muted">Se o custo total estiver errado, usa «Editar encomenda». Aqui registas o valor que já pagaste ou corriges o saldo em dívida.</p>
+    <div id="supplierBalanceMsg" class="notice" hidden></div>
+    <div class="btn-row"><button class="btn btn-light" id="cancelSupplierBalance">Cancelar</button><button class="btn" id="saveSupplierBalance">Guardar valor</button></div>
+  </section></div>`);
+  const close=()=>document.getElementById("supplierBalanceModal")?.remove();
+  document.getElementById("closeSupplierBalance").onclick=close;
+  document.getElementById("cancelSupplierBalance").onclick=close;
+  document.getElementById("saveSupplierBalance").onclick=async()=>{
+    const raw=document.getElementById("supplierAmountDue").value.trim();
+    const due=Number(raw);
+    const msg=document.getElementById("supplierBalanceMsg");hide(msg);
+    if(!raw||!Number.isFinite(due)||due<0||due>total||Math.abs(due*100-Math.round(due*100))>1e-6)
+      return show(msg,`Escreve um valor entre 0 € e ${eur(total)}, com até duas casas decimais.`,"error");
+    const save=document.getElementById("saveSupplierBalance");save.disabled=true;
+    const {error}=await supabase.rpc("set_supplier_balance",{p_order_item_id:item.id,p_amount_due:due});
+    if(error){save.disabled=false;return show(msg,"Não foi possível guardar: "+error.message,"error")}
+    await loadWorkspaceData();close();renderOrders(document.getElementById("page"));
+  };
+}
+
 function renderOrders(t){
   const month=state.ordersMonth||today().slice(0,7);
   state.ordersMonth=month;
   const allBought=state.items.filter(i=>i.source==="purchased");
-  const unpaidItems=allBought.filter(i=>!i.supplier_paid);
+  const unpaidItems=allBought.filter(i=>supplierDue(i)>0);
   const unpaidOrderIds=new Set(unpaidItems.map(i=>i.order_id));
+  const itemizedUnpaid=supplierCost(unpaidItems,false);
+  const adjustment=supplierAdjustment();
 
   t.innerHTML=`
     ${pageHead("Encomendas","Vê o que falta pagar, encontra encomendas e corrige os dados no mesmo lugar.",can("new-order")?`<button class="btn" id="newOrderBtn">+ Nova encomenda</button>`:"")}
 
     <section class="card payables-hero" aria-label="Resumo dos pagamentos a fornecedores">
-      <div class="payables-amount"><span class="eyebrow">POR PAGAR · TODOS OS MESES</span><strong>${eur(supplierCost(unpaidItems))}</strong><small>${unpaidOrderIds.size} ${unpaidOrderIds.size===1?"encomenda":"encomendas"} · ${unpaidItems.length} ${unpaidItems.length===1?"produto":"produtos"} por pagar</small></div>
-      <div class="payables-secondary"><span>Já pago a fornecedores</span><strong>${eur(supplierCost(allBought,true))}</strong><small>Compras registadas em encomendas</small></div>
-      <div class="payables-explain">O custo do produto entra no resultado da encomenda mesmo antes de pagares ao fornecedor. Marca o pagamento no produto certo depois de pagares.</div>
+      <div class="payables-amount"><span class="eyebrow">POR PAGAR · TODOS OS MESES</span><strong>${eur(supplierTotalDue())}</strong><small>${unpaidOrderIds.size} ${unpaidOrderIds.size===1?"encomenda":"encomendas"} · ${unpaidItems.length} ${unpaidItems.length===1?"produto":"produtos"} por pagar</small><button class="btn btn-light btn-small edit-supplier-total" id="editSupplierTotal">Editar total</button></div>
+      <div class="payables-secondary"><span>Já pago nas encomendas</span><strong>${eur(supplierCost(allBought,true))}</strong><small>Pagamentos registados por produto</small></div>
+      <div class="payables-explain"><strong>Soma dos produtos: ${eur(itemizedUnpaid)}</strong>${adjustment?`<br>Ajuste manual: ${signedEur(adjustment)}. Este ajuste aparece no total, mas não altera as encomendas.`:""}<p>Para acertar um produto específico, usa «Alterar dívida». O resultado da encomenda continua a usar o custo do produto.</p></div>
     </section>
 
     <div class="orders-view-tabs" role="group" aria-label="Ver encomendas">
@@ -854,6 +930,7 @@ function renderOrders(t){
     <div id="orderList" class="grid"></div>`;
 
   document.getElementById("newOrderBtn")?.addEventListener("click",()=>go("new-order"));
+  document.getElementById("editSupplierTotal")?.addEventListener("click",openSupplierTotal);
   const monthInput=document.getElementById("ordersMonth");
   const supplierFilter=document.getElementById("supplierFilter");
   const statusFilter=document.getElementById("orderStatusFilter");
@@ -918,22 +995,23 @@ function renderOrders(t){
         </div>
 
         <div class="order-products supplier-products">
-          ${[...items].sort((a,b)=>Number(a.supplier_paid)-Number(b.supplier_paid)).map(i=>{
+          ${[...items].sort((a,b)=>supplierDue(b)-supplierDue(a)).map(i=>{
             if(i.source==="stock"){
               return `<div class="supplier-item stock-source">
                 <div><strong>${i.quantity}× ${esc(i.product_name)}</strong> · ${esc(i.size||"-")}</div>
                 <span class="badge">Do stock</span>
               </div>`;
             }
-            const amount=Number(i.quantity||0)*Number(i.purchase_price||0);
-            return `<div class="supplier-item ${i.supplier_paid?"is-paid":"is-unpaid"}">
+            const amount=supplierTotal(i),paid=supplierPaidAmount(i),due=supplierDue(i);
+            return `<div class="supplier-item ${due?"is-unpaid":"is-paid"}">
               <div class="supplier-item-main">
                 <strong>${i.quantity}× ${esc(i.product_name)}</strong> · ${esc(i.size||"-")}
-                <small>Fornecedor: ${esc(i.supplier_name||"Não indicado — edita a encomenda")} · Custo total ${eur(amount)}${i.supplier_paid_at&&i.supplier_paid?` · Pago em ${esc(new Date(i.supplier_paid_at).toLocaleDateString("pt-PT",{timeZone:"Europe/Lisbon"}))}`:""}</small>
+                <small>Fornecedor: ${esc(i.supplier_name||"Não indicado — edita a encomenda")} · Custo ${eur(amount)} · Já pago ${eur(paid)} · <strong>Falta ${eur(due)}</strong>${i.supplier_paid_at&&!due?` · Pago em ${esc(new Date(i.supplier_paid_at).toLocaleDateString("pt-PT",{timeZone:"Europe/Lisbon"}))}`:""}</small>
               </div>
-              <span class="badge supplier-status ${i.supplier_paid?"paid":"unpaid"}">${i.supplier_paid?"PAGO":"POR PAGAR"}</span>
-              <button class="btn ${i.supplier_paid?"btn-light":"btn-success"} btn-small" data-supplier-pay="${i.id}" data-next-paid="${i.supplier_paid?"0":"1"}">
-                ${i.supplier_paid?"Marcar por pagar":"Marcar pago"}
+              <span class="badge supplier-status ${due?"unpaid":"paid"}">${due?(paid?"PARCIAL":"POR PAGAR"):"PAGO"}</span>
+              <button class="btn btn-light btn-small" data-supplier-balance="${i.id}">Alterar dívida</button>
+              <button class="btn ${due?"btn-success":"btn-light"} btn-small" data-supplier-pay="${i.id}" data-next-paid="${due?"1":"0"}">
+                ${due?"Marcar pago":"Marcar por pagar"}
               </button>
             </div>`;
           }).join("")}
@@ -956,11 +1034,12 @@ function renderOrders(t){
           </label>
         </div>
       </article>`;
-    }).join(""):`<div class="card empty">${scope==="pending"&&!unpaidOrderIds.size?"Está tudo pago aos fornecedores. As encomendas continuam disponíveis em Por mês e Todas.":scope==="month"&&!monthOrders.length?`Não há encomendas em ${esc(monthLabel(selectedMonth))}. Escolhe outro mês ou abre Por pagar para ver pendentes de outros meses.`:"Não há encomendas com estes filtros. Limpa a pesquisa ou escolhe outro estado."}</div>`;
+    }).join(""):`<div class="card empty">${scope==="pending"&&!unpaidOrderIds.size?(supplierTotalDue()>0?`Não há produtos por pagar nas encomendas. O total inclui ${eur(supplierAdjustment())} de ajuste manual; usa «Editar total» para o corrigir.`:"Está tudo pago aos fornecedores. As encomendas continuam disponíveis em Por mês e Todas."):scope==="month"&&!monthOrders.length?`Não há encomendas em ${esc(monthLabel(selectedMonth))}. Escolhe outro mês ou abre Por pagar para ver pendentes de outros meses.`:"Não há encomendas com estes filtros. Limpa a pesquisa ou escolhe outro estado."}</div>`;
 
     document.querySelectorAll("[data-order-status]").forEach(s=>s.onchange=()=>changeOrderStatus(s.dataset.orderStatus,s.value));
     document.querySelectorAll("[data-edit-order]").forEach(b=>b.onclick=()=>openEditOrder(b.dataset.editOrder));
     document.querySelectorAll("[data-supplier-pay]").forEach(b=>b.onclick=()=>toggleSupplierPayment(b.dataset.supplierPay,b.dataset.nextPaid==="1"));
+    document.querySelectorAll("[data-supplier-balance]").forEach(b=>b.onclick=()=>openSupplierBalance(b.dataset.supplierBalance));
   };
 
   document.querySelectorAll("[data-orders-view]").forEach(button=>button.onclick=()=>{
@@ -995,7 +1074,7 @@ function editOrderItemRow(item,index,locked=false){
         <label>Preço venda / unid. (€)<input data-e="sale" type="number" min="0" step="0.01" value="${Number(item.sale_price||0)}"></label>
         <label>Custo / unid. (€)<input data-e="purchase" type="number" min="0" step="0.01" value="${Number(item.purchase_price||0)}"></label>
         ${item.source==="purchased"?`<label>Fornecedor<input data-e="supplier" value="${esc(item.supplier_name||"")}"></label>
-        <label class="check-row"><input data-e="supplierPaid" type="checkbox" ${item.supplier_paid?"checked":""}> Pago ao fornecedor</label>`:""}
+        <label>Já pago ao fornecedor (€)<input data-e="supplierPaidAmount" type="number" min="0" step="0.01" value="${supplierPaidAmount(item)}"></label>`:""}
       </div>
     </div>`;
   }
@@ -1019,7 +1098,7 @@ function editOrderItemRow(item,index,locked=false){
       </div>
       <div class="grid grid-2" style="margin-top:10px">
         <label>Fornecedor<input data-e="supplier" value="${esc(item.supplier_name||"")}"></label>
-        <label class="check-row"><input data-e="supplierPaid" type="checkbox" ${item.supplier_paid?"checked":""}> Pago ao fornecedor</label>
+        <label>Já pago ao fornecedor (€)<input data-e="supplierPaidAmount" type="number" min="0" step="0.01" value="${supplierPaidAmount(item)}"></label>
       </div>
     </div>
   </div>`;
@@ -1053,7 +1132,7 @@ function renumberEditItems(container){
 }
 
 function emptyEditItem(){
-  return {id:"",source:"purchased",stock_item_id:null,product_name:"",size:"",quantity:1,sale_price:0,purchase_price:0,supplier_name:"",supplier_paid:false,supplier_paid_at:null,supplier_note:null};
+  return {id:"",source:"purchased",stock_item_id:null,product_name:"",size:"",quantity:1,sale_price:0,purchase_price:0,supplier_name:"",supplier_amount_paid:0,supplier_paid:false,supplier_paid_at:null,supplier_note:null};
 }
 
 function readEditOrderItems(container,locked){
@@ -1075,17 +1154,21 @@ function readEditOrderItems(container,locked){
         product_name:locked?(productInput?.value||""):(st?.product_name||""),
         size:locked?(sizeInput?.value||""):(st?.size||""),
         quantity:qty,sale_price,purchase_price:0,
-        supplier_name:null,supplier_paid:false,supplier_paid_at:null,supplier_note:null
+        supplier_name:null,supplier_amount_paid:0,supplier_paid:false,supplier_paid_at:null,supplier_note:null
       };
     }
 
-    const supplier_paid=!!row.querySelector('[data-e="supplierPaid"]')?.checked;
+    const rawPaid=row.querySelector('[data-e="supplierPaidAmount"]')?.value.trim()||"0";
+    const supplier_amount_paid=Number(rawPaid);
+    const total=qty*purchase_price;
+    const supplier_paid=supplier_amount_paid>=total;
     return {
       id,source,stock_item_id:null,
       product_name:row.querySelector('[data-e="product"]').value.trim(),
       size:row.querySelector('[data-e="size"]').value.trim(),
       quantity:qty,sale_price,purchase_price,
       supplier_name:row.querySelector('[data-e="supplier"]')?.value.trim()||null,
+      supplier_amount_paid,
       supplier_paid,
       supplier_paid_at:supplier_paid?(original?.supplier_paid_at||null):null,
       supplier_note:original?.supplier_note||null
@@ -1141,6 +1224,8 @@ function openEditOrder(id){
     for(const [i,it] of editedItems.entries()){
       if(!it.product_name)return show(msg,`Falta o produto ${i+1}.`,"error");
       if(it.source==="stock"&&!it.stock_item_id)return show(msg,`Escolhe o stock do produto ${i+1}.`,"error");
+      if(it.source==="purchased"&&(!Number.isFinite(it.supplier_amount_paid)||it.supplier_amount_paid<0||it.supplier_amount_paid>it.quantity*it.purchase_price))
+        return show(msg,`No produto ${i+1}, o valor já pago tem de estar entre 0 € e o custo total.`,"error");
     }
 
     try{
