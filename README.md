@@ -115,3 +115,14 @@ Extrai o ZIP e substitui apenas `index.html`, `app.js`, `styles.css` e `README.m
 
 ### Publicar v9
 Na raiz do ramo `main` do repositório `Lucky-Urban`, substitui apenas `index.html`, `app.js`, `styles.css` e `README.md` pelos ficheiros deste pacote. Mantém o `config.js` atual e não executes novamente os ficheiros SQL. Aguarda o deploy do Render e atualiza a página.
+
+## v10 — Painel mais simples
+- O menu principal mostra apenas **Início**, **Nova encomenda**, **Encomendas**, **Stock** e **Lucros**. **Catálogo**, Meta Ads, Portes e Despesas ficam em **Mais opções** (ou **Mais** no telemóvel). As permissões existentes continuam a ser respeitadas.
+- O **Início** tem três números claros: lucro do mês, total por pagar ao fornecedor e encomendas do mês. Os botões levam diretamente às tarefas e o mês pode ser alterado no topo.
+- Em **Nova encomenda**, o produto começa em **Comprado ao fornecedor**. Se já estiver em casa, muda a origem para **Já está no stock**. Escreve o nome e escolhe o preço guardado no catálogo. Ao aumentar o número de produtos, os dados já escritos nas linhas anteriores ficam preenchidos.
+- Em **Encomendas**, a dívida total aparece primeiro; as contas detalhadas e filtros adicionais abrem apenas quando precisares. Em **Por pagar**, os produtos ficam abertos para registar pagamentos; nas outras vistas, abre uma encomenda para ver os produtos. As contas de cada encomenda estão em **Ver contas da encomenda**.
+- Em **Stock**, `+` e `−` ficam visíveis; **Mais** contém definir quantidade e editar. No **Catálogo**, o formulário simples de nome e custo fica primeiro; códigos de barras e scanner estão numa secção que se abre quando necessário.
+- As alterações v9 de Lucros, meta de 1 000 €, catálogo com custo automático e correção das entradas de stock estão incluídas neste pacote. A migração SQL da v9 já foi aplicada; não voltes a executá-la.
+
+### Publicar v10
+Substitui apenas `index.html`, `app.js`, `styles.css` e `README.md` na raiz do ramo `main`. Mantém `config.js` e `render.yaml` atuais. A migração da base de dados já foi aplicada e não tens de carregar SQL.

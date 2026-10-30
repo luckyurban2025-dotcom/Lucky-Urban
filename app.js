@@ -105,6 +105,15 @@ function navItems(){
   else base.push(catalogItem);
   return base;
 }
+function mainNavItems(){
+  const order=["dashboard","new-order","orders","stock","profits"];
+  const items=navItems();
+  return order.map(id=>items.find(([key])=>key===id)).filter(Boolean);
+}
+function extraNavItems(){
+  const primary=new Set(["dashboard","new-order","orders","stock","profits"]);
+  return navItems().filter(([id])=>!primary.has(id));
+}
 function renderShell(){
   if(isAdmin()){
     app.innerHTML=`<div class="app-shell admin-only-shell"><aside class="sidebar">
@@ -119,15 +128,22 @@ function renderShell(){
     return;
   }
 
-  const nav=navItems();
+  const nav=mainNavItems();
+  const extra=extraNavItems();
+  const navigation=([id,label])=>`<button class="nav-btn ${state.page===id?"active":""}" data-page="${id}">${label}</button>`;
   app.innerHTML=`<div class="app-shell"><aside class="sidebar">
     <div class="side-brand">${logo(state.workspace?.logo_url,state.workspace?.name,"side-logo")}<div><strong>${esc(state.workspace?.name||"Gestão")}</strong><small>${esc(state.access?.display_name||"")}</small></div></div>
-    <nav class="nav-group"><div class="nav-label">Menu</div>${nav.map(([id,l])=>`<button class="nav-btn ${state.page===id?"active":""}" data-page="${id}">${l}</button>`).join("")}</nav>
+    <nav class="nav-group" aria-label="Áreas principais"><div class="nav-label">Trabalho diário</div>${nav.map(navigation).join("")}</nav>
+    ${extra.length?`<details class="nav-extra" ${extra.some(([id])=>id===state.page)?"open":""}><summary>Mais opções</summary><nav class="nav-group" aria-label="Outras áreas">${extra.map(navigation).join("")}</nav></details>`:""}
     <div class="sidebar-foot"><button id="switchUser">Trocar utilizador</button><button id="logout">Terminar sessão</button></div>
-  </aside><main class="main"><div id="page"></div></main><nav class="mobile-nav">${nav.slice(0,5).map(([id,l])=>`<button data-page="${id}" class="${state.page===id?"active":""}">${l}</button>`).join("")}</nav></div>`;
+  </aside><main class="main">
+    <div class="mobile-topbar"><strong>${esc(state.workspace?.name||"Gestão")}</strong>${extra.length?`<details class="mobile-more"><summary>Mais</summary><div class="mobile-more-panel">${extra.map(navigation).join("")}<button type="button" id="mobileSwitchUser">Trocar utilizador</button></div></details>`:`<button type="button" id="mobileSwitchUser">Trocar utilizador</button>`}</div>
+    <div id="page"></div>
+  </main><nav class="mobile-nav" aria-label="Áreas principais">${nav.map(([id,l])=>`<button data-page="${id}" class="${state.page===id?"active":""}">${id==="new-order"?"+ Nova":l}</button>`).join("")}</nav></div>`;
   document.querySelectorAll("[data-page]").forEach(b=>b.onclick=()=>go(b.dataset.page));
   document.getElementById("logout").onclick=logout;
   document.getElementById("switchUser").onclick=logout;
+  document.getElementById("mobileSwitchUser")?.addEventListener("click",logout);
   renderPage();
 }
 function go(page){state.page=page;renderShell()}
@@ -173,95 +189,61 @@ function monthlyProfitData(month){
 }
 function renderDashboard(t){
   const month=state.dashboardMonth||today().slice(0,7);
-  const {orders,revenue,meta,real}=monthlyProfitData(month);
-  const units=state.stock.reduce((a,x)=>a+Math.max(0,Number(x.quantity||0)),0);
+  const {orders,real}=monthlyProfitData(month);
   const delivered=orders.filter(x=>x.status==="Entregue").length;
   const returned=orders.filter(x=>x.status==="Devolvido").length;
+  const inTransit=orders.filter(x=>x.status==="Em trânsito").length;
   const monthOrders=[...orders].sort((a,b)=>String(b.order_date).localeCompare(String(a.order_date))).slice(0,5);
-  const monthOrderIds=new Set(orders.map(o=>o.id));
-  const supplierItems=state.items.filter(i=>monthOrderIds.has(i.order_id)&&i.source==="purchased");
-  const supplierPaid=supplierCost(supplierItems,true);
-  const supplierUnpaid=supplierCost(supplierItems,false);
   const allUnpaid=state.items.filter(i=>i.source==="purchased"&&supplierDue(i)>0);
   const totalUnpaid=supplierTotalDue();
-  const itemizedUnpaid=supplierCost(allUnpaid,false);
   const pendingOrders=new Set(allUnpaid.map(i=>i.order_id)).size;
   const label=monthLabel(month);
+  const progress=Math.min(100,Math.max(0,real/1000*100));
 
   t.innerHTML=`
-    ${pageHead("Início",`Resumo de ${state.workspace.name}`)}
+    ${pageHead("Início",`O essencial de ${state.workspace.name}`,can("new-order")?'<button class="btn" id="quickOrder">+ Nova encomenda</button>':"")}
 
-    <div class="month-toolbar card">
-      <button class="btn btn-light month-arrow" id="prevMonth">←</button>
-      <div class="month-title">
-        <span>Mês a analisar</span>
-        <strong>${esc(label)}</strong>
-      </div>
-      <input id="dashboardMonth" type="month" value="${esc(month)}">
-      <button class="btn btn-light month-arrow" id="nextMonth">→</button>
-      <button class="btn btn-soft" id="thisMonth">Mês atual</button>
+    <div class="month-toolbar card simple-month-toolbar">
+      <span>Mês</span>
+      <button class="btn btn-light month-arrow" id="prevMonth" aria-label="Mês anterior">←</button>
+      <strong class="month-name">${esc(label)}</strong>
+      <button class="btn btn-light month-arrow" id="nextMonth" aria-label="Mês seguinte">→</button>
+      <input id="dashboardMonth" type="month" value="${esc(month)}" aria-label="Escolher mês">
+      <button class="btn btn-soft" id="thisMonth">Hoje</button>
     </div>
 
-    <div class="stats">
-      <div class="stat">
-        <div class="stat-label">Receita</div>
-        <div class="stat-value">${eur(revenue)}</div>
-        <div class="stat-note">${esc(label)}</div>
-      </div>
-      <div class="stat">
-        <div class="stat-label">Resultado do mês</div>
-        <div class="stat-value ${real>=0?"good":"bad"}">${eur(real)}</div>
-        <div class="stat-note">inclui produtos ainda por pagar, despesas e compras de stock</div>
-      </div>
-      <div class="stat">
-        <div class="stat-label">Stock em casa</div>
-        <div class="stat-value">${int(units)}</div>
-        <div class="stat-note">stock atual, não histórico</div>
-      </div>
-      <div class="stat">
-        <div class="stat-label">Meta Ads</div>
-        <div class="stat-value">${eur(meta)}</div>
-        <div class="stat-note">${esc(label)}</div>
-      </div>
-    </div>
-
-    <div class="dashboard-work-stats">
-      <div class="soft-card"><div class="stat-label">Encomendas</div><div class="stat-value">${orders.length}</div></div>
-      <div class="soft-card"><div class="stat-label">Entregues</div><div class="stat-value good">${delivered}</div></div>
-      <div class="soft-card"><div class="stat-label">Devolvidas</div><div class="stat-value bad">${returned}</div></div>
-      <div class="soft-card supplier-paid-card"><div class="stat-label">Pago a fornecedores</div><div class="stat-value good">${eur(supplierPaid)}</div><div class="stat-note">encomendas deste mês</div></div>
-      <div class="soft-card supplier-unpaid-card"><div class="stat-label">Por pagar neste mês</div><div class="stat-value ${supplierUnpaid>0?"bad":""}">${eur(supplierUnpaid)}</div><div class="stat-note">encomendas deste mês</div></div>
-    </div>
-
-    ${can("orders")?`<section class="card dashboard-pending"><div><span class="eyebrow">TODOS OS MESES</span><h2>${eur(totalUnpaid)} por pagar a fornecedores</h2><p>${pendingOrders} ${pendingOrders===1?"encomenda":"encomendas"} com produtos por pagar.${supplierAdjustment()?` Soma das encomendas: ${eur(itemizedUnpaid)} · Ajuste manual: ${signedEur(supplierAdjustment())}.`:""}</p></div><div class="btn-row"><button class="btn btn-light" id="editDashboardSupplierTotal">Editar total</button><button class="btn" id="openPendingOrders">Ver o que falta pagar →</button></div></section>`:""}
-
-    <div class="two-col" style="margin-top:16px">
-      <section class="card">
-        <div class="section-head">
-          <h2>Encomendas de ${esc(label)}</h2>
-          <span class="spacer"></span>
-          ${can("orders")?`<button class="btn btn-light" id="allOrders">Ver todas</button>`:""}
-        </div>
-        ${monthOrders.length?`<div class="grid">${monthOrders.map(o=>`
-          <div class="order-card">
-            <div class="order-top">
-              <strong>${esc(o.order_ref)}</strong>
-              <span class="badge">${esc(o.status)}</span>
-              <span class="spacer"></span>
-              <strong>${eur(o.revenue)}</strong>
-            </div>
-            <div class="muted">${esc(o.order_date)} · ${esc(o.channel)}</div>
-          </div>`).join("")}</div>`:`<div class="empty">Não existem encomendas neste mês.</div>`}
+    <div class="home-summary">
+      <section class="card home-profit">
+        <span class="eyebrow">LUCRO DO MÊS</span>
+        <strong class="home-amount ${real>=0?"good":"bad"}">${eur(real)}</strong>
+        <div class="home-progress"><span style="width:${progress}%"></span></div>
+        <p>Objetivo: 1 000 € de lucro · ${real>=1000?"Conseguido!":`faltam ${eur(Math.max(0,1000-real))}`}</p>
+        <button class="text-action" id="openProfits">Ver previsão de encomendas →</button>
       </section>
-
-      <section class="card">
-        <div class="section-head"><h2>Ações rápidas</h2></div>
-        <div class="grid">
-          ${can("new-order")?`<button class="btn" id="quickOrder">+ Nova encomenda</button>`:""}
-          ${can("stock")?`<button class="btn btn-light" id="quickStock">Abrir stock</button>`:""}
-        </div>
+      ${can("orders")?`<section class="card home-supplier">
+        <span class="eyebrow">FORNECEDOR · TODOS OS MESES</span>
+        <h2>${eur(totalUnpaid)} por pagar a fornecedores</h2>
+        <p>${pendingOrders} ${pendingOrders===1?"encomenda":"encomendas"} por pagar</p>
+        <div class="btn-row"><button class="btn btn-light" id="openPendingOrders">Ver produtos</button><button class="text-action" id="editDashboardSupplierTotal">Acertar total</button></div>
+      </section>`:""}
+      <section class="card home-orders">
+        <span class="eyebrow">ENCOMENDAS DE ${esc(label).toUpperCase()}</span>
+        <strong class="home-amount">${int(orders.length)}</strong>
+        <p>${delivered} entregues · ${inTransit} em trânsito · ${returned} devolvidas</p>
+        ${can("orders")?'<button class="text-action" id="allOrders">Ver encomendas →</button>':""}
       </section>
-    </div>`;
+    </div>
+
+    <section class="home-actions" aria-label="Ações rápidas">
+      ${can("orders")?'<button class="home-action" id="openAllOrders"><strong>Encomendas</strong><span>Pesquisar e editar →</span></button>':""}
+      ${can("stock")?'<button class="home-action" id="quickStock"><strong>Stock</strong><span>Ver e adicionar produtos →</span></button>':""}
+      <button class="home-action" id="quickCatalog"><strong>Catálogo</strong><span>Guardar o custo de um produto →</span></button>
+    </section>
+
+    ${monthOrders.length?`<section class="card home-recent">
+      <div class="section-head"><h2>Últimas encomendas</h2></div>
+      <div class="home-recent-list">${monthOrders.map(o=>`<div class="home-recent-row"><strong>${esc(o.order_ref)}</strong><span>${esc(o.status)}</span><small>${esc(o.order_date)}</small></div>`).join("")}</div>
+    </section>`:""}`;
 
   document.getElementById("prevMonth").onclick=()=>shiftDashboardMonth(-1);
   document.getElementById("nextMonth").onclick=()=>shiftDashboardMonth(1);
@@ -276,10 +258,13 @@ function renderDashboard(t){
     renderDashboard(document.getElementById("page"));
   };
   document.getElementById("allOrders")?.addEventListener("click",()=>{state.ordersView="month";state.ordersMonth=month;go("orders")});
+  document.getElementById("openAllOrders")?.addEventListener("click",()=>{state.ordersView="all";go("orders")});
   document.getElementById("openPendingOrders")?.addEventListener("click",()=>{state.ordersView="pending";go("orders")});
   document.getElementById("editDashboardSupplierTotal")?.addEventListener("click",openSupplierTotal);
   document.getElementById("quickOrder")?.addEventListener("click",()=>go("new-order"));
   document.getElementById("quickStock")?.addEventListener("click",()=>go("stock"));
+  document.getElementById("quickCatalog")?.addEventListener("click",()=>go("catalog"));
+  document.getElementById("openProfits")?.addEventListener("click",()=>go("profits"));
 }
 
 function profitForecast(month){
@@ -381,19 +366,19 @@ function parseSizes(value){
 
 function renderCatalog(t){
   t.innerHTML=`
-    ${pageHead("Catálogo","Guarda uma vez o nome e o custo para preencher encomendas rapidamente.",`
-      <button class="btn btn-light" id="printCodes">Imprimir códigos</button>
-      <button class="btn" id="scanEntry">📷 Scanear entrada</button>`)}
+    ${pageHead("Catálogo","Guarda o nome e o preço de compra. Ao criar uma encomenda, basta escolher o produto.")}
     <section class="card catalog-quick">
-      <div class="section-head"><h2>Preços guardados</h2></div>
+      <div class="section-head"><h2>Preços de compra guardados</h2></div>
       <div class="catalog-quick-form">
         <label>Produto<input id="quickProduct" placeholder="Ex.: NIKE AIR FORCE BRANCO"></label>
-        <label>Custo por unidade (€)<input id="quickCost" type="number" min="0" step="0.01" placeholder="Ex.: 17,00"></label>
+        <label>Quanto custa cada unidade? (€)<input id="quickCost" type="number" min="0" step="0.01" placeholder="Ex.: 17,00"></label>
         <button class="btn" id="saveQuickCatalog">Guardar produto</button>
       </div>
       <div id="quickCatalogMsg" class="notice" hidden></div>
       <div id="quickCostList"></div>
     </section>
+    <details class="catalog-advanced" id="catalogAdvanced"><summary>Códigos de barras e scanner</summary>
+    <div class="btn-row catalog-scan-actions"><button class="btn btn-light" id="printCodes">Imprimir códigos</button><button class="btn" id="scanEntry">📷 Scanear entrada</button></div>
     <div class="two-col catalog-layout">
       <section class="card">
         <div class="section-head">
@@ -426,7 +411,7 @@ function renderCatalog(t){
           <div id="catalogMsg" class="notice" hidden></div>
         </div>
       </section>
-    </div>`;
+    </div></details>`;
 
   const search=document.getElementById("catalogSearch");
   const draw=()=>{
@@ -726,7 +711,7 @@ function renderStock(t){
   t.innerHTML=`${pageHead("Stock","O que existe fisicamente neste espaço")}<div class="two-col"><section class="card"><div class="section-head"><h2>Stock atual</h2><span class="spacer"></span><input class="search" id="stockSearch" placeholder="Pesquisar produto, tamanho ou código"></div><label class="stock-zero-toggle"><input type="checkbox" id="showZeroStock"> Mostrar artigos esgotados</label><div id="stockList"></div></section><section class="card"><div class="section-head"><h2>Adicionar stock</h2></div><div class="grid"><label>Produto<input id="stProduct" placeholder="Ex.: ADIDAS SAMBA"></label><div class="grid grid-2"><label>Tamanho<input id="stSize" placeholder="38 / M"></label><label>Quantidade<input id="stQty" type="number" min="1" value="1"></label></div><label>Preço de compra / unidade (€)<input id="stCost" type="number" min="0" step="0.01" value="0"></label><label>Código de barras<input id="stBarcode" placeholder="Opcional"></label><div class="btn-row"><button class="btn btn-light" id="genBarcode">Gerar código</button><button class="btn" id="saveStock">Guardar</button></div><div id="stockMsg" class="notice" hidden></div></div></section></div>`;
   const search=document.getElementById("stockSearch");
   const showZero=document.getElementById("showZeroStock");
-  const draw=()=>{const q=search.value.trim().toLowerCase();const list=stockGroups().filter(x=>(showZero.checked||Number(x.quantity)>0)&&(!q||[x.product_name,x.size,...x.rows.map(r=>r.barcode)].join(" ").toLowerCase().includes(q)));document.getElementById("stockList").innerHTML=list.length?`<div class="stock-grid">${list.map(x=>`<div class="stock-row"><div class="stock-name"><strong>${esc(x.product_name)}</strong><small>${esc(x.size||"Sem tamanho")} ${x.barcode?`· <span class="barcode">${esc(x.barcode)}</span>`:""}</small></div><div class="stock-qty">${int(x.quantity)}</div><div class="stock-cost">${eur(x.unit_cost)}</div><div class="stock-actions"><button class="icon-btn" data-dec="${x.id}">−</button><button class="icon-btn" data-add="${x.id}">+</button><button class="btn btn-light" data-set="${x.id}">Qtd.</button><button class="btn btn-light" data-edit-stock="${x.id}">Editar</button></div></div>`).join("")}</div>`:`<div class="empty">${showZero.checked?"Nenhum artigo encontrado.":"Não há artigos disponíveis. Para corrigir um esgotado, ativa «Mostrar artigos esgotados»."}</div>`;document.querySelectorAll("[data-dec]").forEach(b=>b.onclick=()=>changeStock(b.dataset.dec,-1));document.querySelectorAll("[data-add]").forEach(b=>b.onclick=()=>changeStock(b.dataset.add,1));document.querySelectorAll("[data-set]").forEach(b=>b.onclick=()=>setStock(b.dataset.set));document.querySelectorAll("[data-edit-stock]").forEach(b=>b.onclick=()=>openEditStock(b.dataset.editStock))};
+  const draw=()=>{const q=search.value.trim().toLowerCase();const list=stockGroups().filter(x=>(showZero.checked||Number(x.quantity)>0)&&(!q||[x.product_name,x.size,...x.rows.map(r=>r.barcode)].join(" ").toLowerCase().includes(q)));document.getElementById("stockList").innerHTML=list.length?`<div class="stock-grid">${list.map(x=>`<div class="stock-row"><div class="stock-name"><strong>${esc(x.product_name)}</strong><small>${esc(x.size||"Sem tamanho")} ${x.barcode?`· <span class="barcode">${esc(x.barcode)}</span>`:""}</small></div><div class="stock-qty">${int(x.quantity)}</div><div class="stock-cost">${eur(x.unit_cost)}</div><div class="stock-actions"><button class="icon-btn" data-dec="${x.id}" aria-label="Retirar uma unidade">−</button><button class="icon-btn" data-add="${x.id}" aria-label="Adicionar uma unidade">+</button><details class="stock-more"><summary>Mais</summary><div><button class="btn btn-light btn-small" data-set="${x.id}">Definir quantidade</button><button class="btn btn-light btn-small" data-edit-stock="${x.id}">Editar produto</button></div></details></div></div>`).join("")}</div>`:`<div class="empty">${showZero.checked?"Nenhum artigo encontrado.":"Não há artigos disponíveis. Para corrigir um esgotado, ativa «Mostrar artigos esgotados»."}</div>`;document.querySelectorAll("[data-dec]").forEach(b=>b.onclick=()=>changeStock(b.dataset.dec,-1));document.querySelectorAll("[data-add]").forEach(b=>b.onclick=()=>changeStock(b.dataset.add,1));document.querySelectorAll("[data-set]").forEach(b=>b.onclick=()=>setStock(b.dataset.set));document.querySelectorAll("[data-edit-stock]").forEach(b=>b.onclick=()=>openEditStock(b.dataset.editStock))};
   search.oninput=draw;showZero.onchange=draw;draw();
   document.getElementById("genBarcode").onclick=()=>{const p=(state.workspace.slug||"").startsWith("verseline")?"VE":"ST";document.getElementById("stBarcode").value=`${p}-${Date.now().toString().slice(-8)}-${Math.random().toString(36).slice(2,5).toUpperCase()}`};
   document.getElementById("saveStock").onclick=async()=>{const msg=document.getElementById("stockMsg");hide(msg);const product_name=document.getElementById("stProduct").value.trim(),size=document.getElementById("stSize").value.trim()||null,quantity=Math.max(1,Number(document.getElementById("stQty").value||1)),unit_cost=Math.max(0,Number(document.getElementById("stCost").value||0)),barcode=document.getElementById("stBarcode").value.trim()||null;if(!product_name)return show(msg,"Escreve o nome do produto.","error");const {data:created,error}=await supabase.from("stock_items").insert({workspace_id:state.workspace.id,product_name,size,quantity,initial_quantity:quantity,unit_cost,origin:"Compra manual",barcode}).select().single();
@@ -834,7 +819,7 @@ function openEditStock(id){
 
 function orderItemTemplate(i){
   const options=stockGroups().filter(s=>Number(s.quantity)>0).map(s=>`<option value="${s.id}">${esc(s.product_name)} · ${esc(s.size||"-")} · ${s.quantity} un.</option>`).join("");
-  return `<div class="order-item" data-item="${i}"><div class="order-item-title"><strong>Produto ${i+1}</strong></div><div class="grid grid-3"><label>Vai usar stock?<select data-f="useStock"><option value="yes">SIM — escolher do stock</option><option value="no">NÃO — comprado / sem stock</option></select></label><label>Quantidade<input data-f="qty" type="number" min="1" value="1"></label><label>Preço venda / unidade (€)<input data-f="sale" type="number" min="0" step="0.01" value="0"></label></div><div class="order-box" data-box="stock"><label>Escolhe o artigo<select data-f="stockId"><option value="">— escolher —</option>${options}</select></label></div><div class="order-box hidden" data-box="manual">
+  return `<div class="order-item" data-item="${i}"><div class="order-item-title"><strong>Produto ${i+1}</strong></div><div class="grid grid-3"><label>Origem<select data-f="useStock"><option value="no">Comprado ao fornecedor</option><option value="yes">Já está no stock</option></select></label><label>Quantidade<input data-f="qty" type="number" min="1" value="1"></label><label>Preço de venda / unidade (€)<input data-f="sale" type="number" min="0" step="0.01" value="0"></label></div><div class="order-box hidden" data-box="stock"><label>Escolhe o artigo<select data-f="stockId"><option value="">— escolher —</option>${options}</select></label></div><div class="order-box" data-box="manual">
   <div class="grid grid-3">
     <label class="catalog-product-field">Produto<input data-f="product" autocomplete="off" placeholder="Escreve para procurar no catálogo"><div class="catalog-suggestions" data-catalog-suggestions hidden></div></label>
     <label>Tamanho<input data-f="size"></label>
@@ -847,9 +832,38 @@ function orderItemTemplate(i){
 </div></div>`;
 }
 function renderNewOrder(t){
-  t.innerHTML=`${pageHead("Nova encomenda","Escolhe quantos produtos e só aparecem esses produtos")}<section class="card"><div class="grid grid-4"><label>Data<input id="oDate" type="date" value="${today()}"></label><label>Nº encomenda / referência<input id="oRef" placeholder="#1501"></label><label>Canal<select id="oChannel">${CHANNELS.map(x=>`<option>${x}</option>`).join("")}</select></label><label>Tipo de portes<select id="oShipping">${state.shipping.map(x=>`<option>${esc(x.shipping_type)}</option>`).join("")}</select></label></div><div class="grid grid-2" style="margin-top:14px"><label>Quantos produtos?<select id="oCount">${Array.from({length:10},(_,i)=>`<option value="${i+1}">${i+1}</option>`).join("")}</select></label><label>Estado<select id="oStatus">${STATUSES.map(x=>`<option>${x}</option>`).join("")}</select></label></div><hr class="sep"><div id="orderItems" class="grid"></div><hr class="sep"><div class="btn-row"><button class="btn" id="saveOrder">Guardar encomenda</button><span class="muted" id="orderPreview"></span></div><div id="orderMsg" class="notice" hidden></div></section>`;
+  t.innerHTML=`${pageHead("Nova encomenda","Preenche a referência e escolhe os produtos.",'<button class="btn btn-light" id="orderOpenCatalog">Guardar custo no catálogo</button>')}<section class="card new-order-form"><div class="grid grid-4"><label>Data<input id="oDate" type="date" value="${today()}"></label><label>Nº da encomenda<input id="oRef" placeholder="#1501"></label><label>Canal<select id="oChannel">${CHANNELS.map(x=>`<option>${x}</option>`).join("")}</select></label><label>Portes<select id="oShipping">${state.shipping.map(x=>`<option>${esc(x.shipping_type)}</option>`).join("")}</select></label></div><div class="grid grid-2 new-order-options"><label>Quantos produtos?<select id="oCount">${Array.from({length:10},(_,i)=>`<option value="${i+1}">${i+1}</option>`).join("")}</select></label><label>Estado<select id="oStatus">${STATUSES.map(x=>`<option>${x}</option>`).join("")}</select></label></div><h2 class="new-order-section-title">Produtos</h2><p class="new-order-hint">Escreve o nome e escolhe uma sugestão do catálogo para preencher o custo automaticamente.</p><div id="orderItems" class="grid"></div><div class="new-order-save"><button class="btn" id="saveOrder">Guardar encomenda</button><span class="muted" id="orderPreview"></span></div><div id="orderMsg" class="notice" hidden></div></section>`;
   const box=document.getElementById("orderItems"),count=document.getElementById("oCount");
-  const draw=()=>{box.innerHTML=Array.from({length:Number(count.value)},(_,i)=>orderItemTemplate(i)).join("");box.querySelectorAll("[data-f='useStock']").forEach(sel=>sel.onchange=()=>{const row=sel.closest("[data-item]");row.querySelector("[data-box='stock']").classList.toggle("hidden",sel.value!=="yes");row.querySelector("[data-box='manual']").classList.toggle("hidden",sel.value==="yes");previewOrder()});box.querySelectorAll("input,select").forEach(x=>x.addEventListener("input",previewOrder));bindCatalogSuggestions(box,"f");previewOrder()};count.onchange=draw;draw();document.getElementById("saveOrder").onclick=saveOrder;
+  const fields=["useStock","qty","sale","stockId","product","size","purchase","supplier"];
+  const draw=()=>{
+    const previous=[...box.querySelectorAll("[data-item]")].map(row=>({
+      values:Object.fromEntries(fields.map(key=>[key,row.querySelector(`[data-f="${key}"]`)?.value||""])),
+      paid:!!row.querySelector('[data-f="supplierPaid"]')?.checked
+    }));
+    box.innerHTML=Array.from({length:Number(count.value)},(_,i)=>orderItemTemplate(i)).join("");
+    [...box.querySelectorAll("[data-item]")].forEach((row,i)=>{
+      if(previous[i]){
+        for(const [key,value] of Object.entries(previous[i].values)){
+          const input=row.querySelector(`[data-f="${key}"]`);
+          if(input)input.value=value;
+        }
+        row.querySelector('[data-f="supplierPaid"]').checked=previous[i].paid;
+      }
+      const source=row.querySelector('[data-f="useStock"]');
+      const updateSource=()=>{
+        row.querySelector('[data-box="stock"]').classList.toggle("hidden",source.value!=="yes");
+        row.querySelector('[data-box="manual"]').classList.toggle("hidden",source.value==="yes");
+        previewOrder();
+      };
+      source.onchange=updateSource;
+      updateSource();
+    });
+    box.querySelectorAll("input,select").forEach(input=>input.addEventListener("input",previewOrder));
+    bindCatalogSuggestions(box,"f");
+    previewOrder();
+  };
+  count.onchange=draw;draw();document.getElementById("saveOrder").onclick=saveOrder;
+  document.getElementById("orderOpenCatalog").onclick=()=>go("catalog");
 }
 function bindCatalogSuggestions(container,mode){
   container.querySelectorAll(`[data-${mode}="product"]`).forEach(input=>{
@@ -1043,12 +1057,11 @@ function renderOrders(t){
   const adjustment=supplierAdjustment();
 
   t.innerHTML=`
-    ${pageHead("Encomendas","Vê o que falta pagar, encontra encomendas e corrige os dados no mesmo lugar.",can("new-order")?`<button class="btn" id="newOrderBtn">+ Nova encomenda</button>`:"")}
+    ${pageHead("Encomendas","Encontra pedidos e vê o que falta pagar ao fornecedor.",can("new-order")?`<button class="btn" id="newOrderBtn">+ Nova encomenda</button>`:"")}
 
     <section class="card payables-hero" aria-label="Resumo dos pagamentos a fornecedores">
       <div class="payables-amount"><span class="eyebrow">POR PAGAR · TODOS OS MESES</span><strong>${eur(supplierTotalDue())}</strong><small>${unpaidOrderIds.size} ${unpaidOrderIds.size===1?"encomenda":"encomendas"} · ${unpaidItems.length} ${unpaidItems.length===1?"produto":"produtos"} por pagar</small><button class="btn btn-light btn-small edit-supplier-total" id="editSupplierTotal">Editar total</button></div>
-      <div class="payables-secondary"><span>Já pago nas encomendas</span><strong>${eur(supplierCost(allBought,true))}</strong><small>Pagamentos registados por produto</small></div>
-      <div class="payables-explain"><strong>Soma dos produtos: ${eur(itemizedUnpaid)}</strong>${adjustment?`<br>Ajuste manual: ${signedEur(adjustment)}. Este ajuste aparece no total, mas não altera as encomendas.`:""}<p>Para acertar um produto específico, usa «Alterar dívida». O resultado da encomenda continua a usar o custo do produto.</p></div>
+      <details class="payables-details"><summary>Ver contas do fornecedor</summary><p>Já pago: <strong>${eur(supplierCost(allBought,true))}</strong></p><p>Soma dos produtos por pagar: <strong>${eur(itemizedUnpaid)}</strong></p>${adjustment?`<p>Ajuste manual: ${signedEur(adjustment)}</p>`:""}<small>Alterar o total em dívida não muda o lucro. Corrige o custo de compra em «Editar encomenda».</small></details>
     </section>
 
     <div class="orders-view-tabs" role="group" aria-label="Ver encomendas">
@@ -1057,11 +1070,16 @@ function renderOrders(t){
       <button type="button" class="orders-view-tab ${state.ordersView==="all"?"active":""}" data-orders-view="all">Todas</button>
     </div>
 
-    <section class="card work-orders-toolbar">
-      <div class="orders-filter-grid">
+    <section class="card work-orders-toolbar order-simple-toolbar">
+      <div class="order-simple-controls">
         <label id="ordersMonthWrap" ${state.ordersView==="month"?"":"hidden"}>Mês da encomenda
           <input id="ordersMonth" type="month" value="${esc(month)}">
         </label>
+        <label>Pesquisar encomenda
+          <input id="orderSearch" value="${esc(state.ordersQuery)}" placeholder="Número ou produto...">
+        </label>
+      </div>
+      <details class="order-filter-details"><summary>Mais filtros</summary><div class="orders-filter-grid">
         <label id="supplierFilterWrap" ${state.ordersView==="pending"?"hidden":""}>Pagamento ao fornecedor
           <select id="supplierFilter">
             <option value="all" ${state.ordersSupplierFilter==="all"?"selected":""}>Todos</option>
@@ -1076,10 +1094,7 @@ function renderOrders(t){
             ${STATUSES.map(s=>`<option value="${esc(s)}" ${state.ordersStatusFilter===s?"selected":""}>${esc(s)}</option>`).join("")}
           </select>
         </label>
-        <label>Pesquisar
-          <input id="orderSearch" value="${esc(state.ordersQuery)}" placeholder="Nº, produto, tamanho ou fornecedor...">
-        </label>
-      </div>
+      </div></details>
     </section>
 
     <div id="supplierSummary"></div>
@@ -1108,12 +1123,7 @@ function renderOrders(t){
     document.getElementById("ordersMonthWrap").hidden=scope!=="month";
     document.getElementById("supplierFilterWrap").hidden=scope==="pending";
     document.getElementById("supplierSummary").innerHTML=scope==="month"?`
-      <div class="supplier-summary">
-        <div class="supplier-kpi"><span>Encomendas em ${esc(monthLabel(selectedMonth))}</span><strong>${monthOrders.length}</strong></div>
-        <div class="supplier-kpi"><span>Custo dos produtos comprados</span><strong>${eur(supplierCost(monthBought))}</strong></div>
-        <div class="supplier-kpi paid"><span>Já pago ao fornecedor</span><strong>${eur(supplierCost(monthBought,true))}</strong></div>
-        <div class="supplier-kpi unpaid"><span>Por pagar ao fornecedor</span><strong>${eur(supplierCost(monthBought,false))}</strong></div>
-      </div>`:"";
+      <p class="order-month-note">${monthOrders.length} encomendas em ${esc(monthLabel(selectedMonth))} · ${eur(supplierCost(monthBought,false))} por pagar deste mês</p>`:"";
 
     const base=scope==="month"?monthOrders:scope==="pending"?state.orders.filter(o=>unpaidOrderIds.has(o.id)):state.orders;
     const list=base.filter(o=>{
@@ -1151,7 +1161,7 @@ function renderOrders(t){
           <span class="order-result"><small>Resultado da encomenda</small><strong class="${Number(o.result)>=0?"good":"bad"}">${eur(o.result)}</strong></span>
         </div>
 
-        <div class="order-products supplier-products">
+        <details class="order-items-details" ${scope==="pending"?"open":""}><summary>${items.length} ${items.length===1?"produto":"produtos"} · ${esc(items[0]?.product_name||"Sem produto")}${items.length>1?"…":""}</summary><div class="order-products supplier-products">
           ${[...items].sort((a,b)=>supplierDue(b)-supplierDue(a)).map(i=>{
             if(i.source==="stock"){
               return `<div class="supplier-item stock-source">
@@ -1172,15 +1182,15 @@ function renderOrders(t){
               </button>
             </div>`;
           }).join("")}
-        </div>
+        </div></details>
 
-        <div class="order-finance-line">
+        <details class="order-finance-details"><summary>Ver contas da encomenda</summary><div class="order-finance-line">
           <span>Venda ${eur(items.reduce((a,i)=>a+Number(i.quantity||0)*Number(i.sale_price||0),0))}</span>
           <span>Custo fornecedor ${eur(orderSupplierTotal)}</span>
           ${orderUnpaid>0?`<strong class="bad">Falta pagar ${eur(orderUnpaid)}</strong>`:`${orderSupplierTotal>0?`<strong class="good">Fornecedor pago</strong>`:""}`}
           <span>Portes ${eur(Number(o.shipping_out)+Number(o.shipping_return))}</span>
           <span>Meta ${eur(o.meta_cost)}</span>
-        </div>
+        </div></details>
 
         <div class="btn-row order-actions-row">
           <button class="btn btn-light" data-edit-order="${o.id}">Editar encomenda</button>
