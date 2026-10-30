@@ -97,8 +97,10 @@ async function loadWorkspaceData(){
 function navItems(){
   const mods=availableModules();
   const base=MODULES.filter(([id])=>mods.includes(id));
+  const dashboardIndex=base.findIndex(([id])=>id==="dashboard");
+  if(dashboardIndex>=0)base.splice(dashboardIndex+1,0,["profits","Lucros"]);
   const stockIndex=base.findIndex(([id])=>id==="stock");
-  const catalogItem=["catalog","Produtos & Códigos"];
+  const catalogItem=["catalog","Catálogo"];
   if(stockIndex>=0)base.splice(stockIndex+1,0,catalogItem);
   else base.push(catalogItem);
   return base;
@@ -134,6 +136,7 @@ function renderPage(){
   const t=document.getElementById("page");
   if(isAdmin()){state.page="admin-users";return renderAdminUsers(t)}
   if(state.page==="dashboard")return renderDashboard(t);
+  if(state.page==="profits"&&can("dashboard"))return renderProfits(t);
   if(state.page==="stock")return renderStock(t);
   if(state.page==="catalog")return renderCatalog(t);
   if(state.page==="new-order")return renderNewOrder(t);
@@ -155,17 +158,22 @@ function shiftDashboardMonth(delta){
   state.dashboardMonth=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;
   renderDashboard(document.getElementById("page"));
 }
-function renderDashboard(t){
-  const month=state.dashboardMonth||today().slice(0,7);
+function monthlyProfitData(month){
   const orders=state.orders.filter(x=>String(x.order_date).startsWith(month));
   const revenue=orders.reduce((a,x)=>a+Number(x.revenue||0),0);
   const orderResult=orders.reduce((a,x)=>a+Number(x.result||0),0);
   const meta=state.meta.filter(x=>String(x.spend_date).startsWith(month)).reduce((a,x)=>a+Number(x.amount||0),0);
   const expenses=state.expenses.filter(x=>String(x.expense_date).startsWith(month)).reduce((a,x)=>a+Number(x.amount||0),0);
   const receiptPurchases=state.receipts.filter(x=>String(x.received_date).startsWith(month)).reduce((a,x)=>a+Number(x.quantity||0)*Number(x.unit_cost||0),0);
-  const legacyStockPurchases=state.stock.filter(x=>x.origin==="Compra manual"&&!x.catalog_id&&String(x.created_at).startsWith(month)).reduce((a,x)=>a+Number(x.initial_quantity||0)*Number(x.unit_cost||0),0);
+  const receiptStockIds=new Set(state.receipts.map(x=>x.stock_item_id).filter(Boolean));
+  const legacyStockPurchases=state.stock.filter(x=>x.origin==="Compra manual"&&!x.catalog_id&&!receiptStockIds.has(x.id)&&String(x.created_at).startsWith(month)).reduce((a,x)=>a+Number(x.initial_quantity||0)*Number(x.unit_cost||0),0);
   const stockPurchases=receiptPurchases+legacyStockPurchases;
   const real=orderResult-expenses-stockPurchases;
+  return {orders,revenue,orderResult,meta,expenses,stockPurchases,real};
+}
+function renderDashboard(t){
+  const month=state.dashboardMonth||today().slice(0,7);
+  const {orders,revenue,meta,real}=monthlyProfitData(month);
   const units=state.stock.reduce((a,x)=>a+Math.max(0,Number(x.quantity||0)),0);
   const delivered=orders.filter(x=>x.status==="Entregue").length;
   const returned=orders.filter(x=>x.status==="Devolvido").length;
@@ -274,9 +282,80 @@ function renderDashboard(t){
   document.getElementById("quickStock")?.addEventListener("click",()=>go("stock"));
 }
 
+function profitForecast(month){
+  const data=monthlyProfitData(month);
+  const completed=data.orders.filter(o=>o.status==="Entregue"||o.status==="Devolvido");
+  const recent=[...state.orders].filter(o=>o.status==="Entregue"||o.status==="Devolvido")
+    .sort((a,b)=>String(b.order_date).localeCompare(String(a.order_date))).slice(0,30);
+  const average=recent.length?recent.reduce((sum,o)=>sum+Number(o.result||0),0)/recent.length:0;
+  const goal=1000;
+  const remaining=Math.max(0,goal-data.real);
+  const ordersRemaining=average>0?Math.ceil(remaining/average):null;
+  const current=today();
+  const [year,monthNumber]=month.split("-").map(Number);
+  const daysInMonth=new Date(year,monthNumber,0).getDate();
+  const elapsed=month<current.slice(0,7)?daysInMonth:month===current.slice(0,7)?Number(current.slice(8,10)):0;
+  const daysLeft=month===current.slice(0,7)?daysInMonth-elapsed+1:0;
+  return {...data,goal,completed,average,recentCount:recent.length,remaining,ordersRemaining,
+    ordersForMonth:ordersRemaining===null?null:completed.length+ordersRemaining,
+    averageDaily:elapsed?data.real/elapsed:null,daysLeft,
+    ordersPerDay:ordersRemaining!==null&&daysLeft?Math.ceil(ordersRemaining/daysLeft):null};
+}
+function renderProfits(t){
+  const month=state.dashboardMonth||today().slice(0,7);
+  const p=profitForecast(month);
+  const currentMonth=month===today().slice(0,7);
+  const progress=Math.min(100,Math.max(0,p.real/p.goal*100));
+  t.innerHTML=`
+    ${pageHead("Lucros",`Resumo de ${monthLabel(month)} · meta de ${eur(p.goal)}`)}
+    <div class="month-toolbar card">
+      <button class="btn btn-light month-arrow" id="profitsPrev" aria-label="Mês anterior">←</button>
+      <div class="month-title"><span>Mês a analisar</span><strong>${esc(monthLabel(month))}</strong></div>
+      <input id="profitsMonth" type="month" value="${esc(month)}">
+      <button class="btn btn-light month-arrow" id="profitsNext" aria-label="Mês seguinte">→</button>
+      <button class="btn btn-soft" id="profitsCurrent">Mês atual</button>
+    </div>
+    <section class="profit-hero card">
+      <div><span class="eyebrow">LUCRO DO MÊS</span><strong class="profit-big ${p.real>=0?"good":"bad"}">${eur(p.real)}</strong><small>Já inclui custos dos produtos, portes, anúncios, devoluções, despesas e compras de stock.</small></div>
+      <div class="profit-goal"><span>Meta de lucro</span><strong>${eur(p.goal)}</strong><div class="profit-progress"><span style="width:${progress}%"></span></div><small>${p.real>=p.goal?"Meta atingida!":`Faltam ${eur(p.remaining)} para a meta.`}</small></div>
+    </section>
+    <div class="profit-metrics">
+      <div class="soft-card"><span class="stat-label">Lucro médio por dia</span><strong>${p.averageDaily===null?"—":eur(p.averageDaily)}</strong><small>${currentMonth?"Dias decorridos neste mês":"Dias do mês selecionado"}</small></div>
+      <div class="soft-card"><span class="stat-label">Lucro médio por encomenda enviada</span><strong>${p.recentCount?eur(p.average):"—"}</strong><small>${p.recentCount} encomendas concluídas recentes, incluindo devoluções</small></div>
+      <div class="soft-card"><span class="stat-label">Encomendas para a meta do mês</span><strong>${p.ordersForMonth===null?"—":int(p.ordersForMonth)}</strong><small>${p.ordersRemaining===null?"Sem média positiva para estimar":`${p.completed.length} concluídas este mês · faltam cerca de ${int(p.ordersRemaining)}`}</small></div>
+      <div class="soft-card"><span class="stat-label">Ritmo necessário</span><strong>${p.ordersPerDay===null?"—":`${int(p.ordersPerDay)} por dia`}</strong><small>${currentMonth?`${p.daysLeft} ${p.daysLeft===1?"dia":"dias"} até ao fim do mês`:"Mostrado apenas para o mês atual"}</small></div>
+    </div>
+    <section class="card profit-supplier"><div><span class="eyebrow">FORNECEDOR · TODOS OS MESES</span><h2>${eur(supplierTotalDue())} por pagar</h2><p>O lucro acima já inclui o custo dos produtos, mesmo quando ainda falta pagar. ${supplierAdjustment()?`Ajuste manual no total: ${signedEur(supplierAdjustment())}.`:""}</p></div><button class="btn btn-light" id="profitsEditSupplier">Editar total</button></section>
+    <p class="profit-footnote">A previsão usa o lucro médio das últimas encomendas concluídas. É uma estimativa; os valores reais variam com preços, devoluções e despesas.</p>`;
+  const shift=delta=>{
+    const [y,m]=month.split("-").map(Number),next=new Date(y,m-1+delta,1);
+    state.dashboardMonth=`${next.getFullYear()}-${String(next.getMonth()+1).padStart(2,"0")}`;
+    renderProfits(t);
+  };
+  document.getElementById("profitsPrev").onclick=()=>shift(-1);
+  document.getElementById("profitsNext").onclick=()=>shift(1);
+  document.getElementById("profitsMonth").onchange=e=>{if(e.target.value){state.dashboardMonth=e.target.value;renderProfits(t)}};
+  document.getElementById("profitsCurrent").onclick=()=>{state.dashboardMonth=today().slice(0,7);renderProfits(t)};
+  document.getElementById("profitsEditSupplier").onclick=openSupplierTotal;
+}
+
 
 function catalogFullName(p){
   return [p.brand,p.product_name,p.variant].filter(Boolean).join(" · ");
+}
+function normalizeCatalogText(value){
+  return String(value||"").normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase().replace(/[^a-z0-9]+/g," ").trim();
+}
+function catalogMatches(query){
+  const tokens=normalizeCatalogText(query).split(" ").filter(Boolean);
+  if(!tokens.length)return [];
+  return state.catalog.filter(p=>{
+    const name=normalizeCatalogText(catalogFullName(p));
+    return tokens.every(token=>name.includes(token));
+  }).sort((a,b)=>{
+    const q=normalizeCatalogText(query);
+    return Number(normalizeCatalogText(catalogFullName(b)).startsWith(q))-Number(normalizeCatalogText(catalogFullName(a)).startsWith(q));
+  }).slice(0,6);
 }
 function generateCatalogBarcode(){
   const prefix=(state.workspace?.slug||"CAT").replace(/[^a-z0-9]/gi,"").slice(0,5).toUpperCase()||"CAT";
@@ -302,9 +381,19 @@ function parseSizes(value){
 
 function renderCatalog(t){
   t.innerHTML=`
-    ${pageHead("Produtos & Códigos","Cada modelo, foto e código fica guardado só nesta área.",`
+    ${pageHead("Catálogo","Guarda uma vez o nome e o custo para preencher encomendas rapidamente.",`
       <button class="btn btn-light" id="printCodes">Imprimir códigos</button>
       <button class="btn" id="scanEntry">📷 Scanear entrada</button>`)}
+    <section class="card catalog-quick">
+      <div class="section-head"><h2>Preços guardados</h2></div>
+      <div class="catalog-quick-form">
+        <label>Produto<input id="quickProduct" placeholder="Ex.: NIKE AIR FORCE BRANCO"></label>
+        <label>Custo por unidade (€)<input id="quickCost" type="number" min="0" step="0.01" placeholder="Ex.: 17,00"></label>
+        <button class="btn" id="saveQuickCatalog">Guardar produto</button>
+      </div>
+      <div id="quickCatalogMsg" class="notice" hidden></div>
+      <div id="quickCostList"></div>
+    </section>
     <div class="two-col catalog-layout">
       <section class="card">
         <div class="section-head">
@@ -351,21 +440,24 @@ function renderCatalog(t){
             <div class="catalog-info">
               <strong>${esc(p.product_name)}</strong>
               <span>${esc([p.brand,p.variant].filter(Boolean).join(" · "))}</span>
-              <small>Tamanhos: ${esc((p.sizes||[]).join(", "))}</small>
+              <small>Tamanhos: ${esc((p.sizes||[]).join(", "))} · Custo: ${eur(p.default_unit_cost)}</small>
             </div>
           </div>
           <div class="barcode-box"><svg data-barcode="${esc(p.barcode)}"></svg></div>
           <div class="btn-row">
             <button class="btn btn-light" data-catalog-entry="${p.id}">Dar entrada</button>
+            <button class="btn btn-light" data-catalog-cost="${p.id}">Editar custo</button>
             <button class="btn btn-danger" data-catalog-delete="${p.id}">Apagar</button>
           </div>
         </article>`).join("")}</div>`
       :`<div class="empty">Ainda não criaste códigos neste utilizador.</div>`;
     renderBarcodeSvgs();
     document.querySelectorAll("[data-catalog-entry]").forEach(b=>b.onclick=()=>showCatalogEntry(b.dataset.catalogEntry));
+    document.querySelectorAll("[data-catalog-cost]").forEach(b=>b.onclick=()=>editCatalogCost(b.dataset.catalogCost));
     document.querySelectorAll("[data-catalog-delete]").forEach(b=>b.onclick=()=>deleteCatalogProduct(b.dataset.catalogDelete));
   };
-  search.oninput=draw;draw();
+  search.oninput=draw;draw();drawQuickCatalogList();
+  document.getElementById("saveQuickCatalog").onclick=saveQuickCatalog;
 
   document.getElementById("shoeSizes").onclick=()=>document.getElementById("catSizes").value=defaultShoeSizes().join(", ");
   document.getElementById("clothingSizes").onclick=()=>document.getElementById("catSizes").value="XS, S, M, L, XL, XXL";
@@ -373,6 +465,40 @@ function renderCatalog(t){
   document.getElementById("saveCatalog").onclick=saveCatalogProduct;
   document.getElementById("scanEntry").onclick=openScannerModal;
   document.getElementById("printCodes").onclick=()=>window.print();
+}
+
+function drawQuickCatalogList(){
+  const box=document.getElementById("quickCostList");if(!box)return;
+  box.innerHTML=state.catalog.length?`<div class="catalog-cost-list">${state.catalog.map(p=>`
+    <div class="catalog-cost-row"><strong>${esc(catalogFullName(p))}</strong><span>${eur(p.default_unit_cost)} / un.</span><button class="btn btn-light btn-small" data-quick-cost="${p.id}">Alterar preço</button></div>`).join("")}</div>`
+    :`<div class="empty">Ainda não há preços guardados. Adiciona o primeiro produto acima.</div>`;
+  box.querySelectorAll("[data-quick-cost]").forEach(b=>b.onclick=()=>editCatalogCost(b.dataset.quickCost));
+}
+async function saveQuickCatalog(){
+  const msg=document.getElementById("quickCatalogMsg");hide(msg);
+  const name=document.getElementById("quickProduct").value.trim();
+  const raw=document.getElementById("quickCost").value.trim();
+  const cost=Number(raw.replace(",","."));
+  if(!name)return show(msg,"Escreve o nome do produto.","error");
+  if(!raw||!Number.isFinite(cost)||cost<0||Math.abs(cost*100-Math.round(cost*100))>1e-6)return show(msg,"Escreve um custo válido, com até duas casas decimais.","error");
+  const existing=state.catalog.find(p=>normalizeCatalogText(catalogFullName(p))===normalizeCatalogText(name));
+  const payload={default_unit_cost:cost,updated_at:new Date().toISOString()};
+  const {error}=existing
+    ?await supabase.from("product_catalog").update(payload).eq("id",existing.id).eq("workspace_id",state.workspace.id)
+    :await supabase.from("product_catalog").insert({workspace_id:state.workspace.id,product_name:name,
+      brand:null,variant:null,barcode:generateCatalogBarcode(),sizes:defaultShoeSizes(),default_unit_cost:cost});
+  if(error)return show(msg,"Não foi possível guardar: "+error.message,"error");
+  await loadWorkspaceData();renderCatalog(document.getElementById("page"));
+}
+async function editCatalogCost(id){
+  const item=state.catalog.find(p=>p.id===id);if(!item)return;
+  const value=prompt(`Novo custo por unidade para ${catalogFullName(item)} (€):`,String(item.default_unit_cost||0));
+  if(value===null)return;
+  const cost=Number(value.replace(",","."));
+  if(!value.trim()||!Number.isFinite(cost)||cost<0||Math.abs(cost*100-Math.round(cost*100))>1e-6)return alert("Escreve um custo válido com até duas casas decimais.");
+  const {error}=await supabase.from("product_catalog").update({default_unit_cost:cost,updated_at:new Date().toISOString()}).eq("id",id).eq("workspace_id",state.workspace.id);
+  if(error)return alert("Não foi possível guardar: "+error.message);
+  await loadWorkspaceData();renderCatalog(document.getElementById("page"));
 }
 
 async function saveCatalogProduct(){
@@ -605,8 +731,10 @@ function renderStock(t){
   document.getElementById("genBarcode").onclick=()=>{const p=(state.workspace.slug||"").startsWith("verseline")?"VE":"ST";document.getElementById("stBarcode").value=`${p}-${Date.now().toString().slice(-8)}-${Math.random().toString(36).slice(2,5).toUpperCase()}`};
   document.getElementById("saveStock").onclick=async()=>{const msg=document.getElementById("stockMsg");hide(msg);const product_name=document.getElementById("stProduct").value.trim(),size=document.getElementById("stSize").value.trim()||null,quantity=Math.max(1,Number(document.getElementById("stQty").value||1)),unit_cost=Math.max(0,Number(document.getElementById("stCost").value||0)),barcode=document.getElementById("stBarcode").value.trim()||null;if(!product_name)return show(msg,"Escreve o nome do produto.","error");const {data:created,error}=await supabase.from("stock_items").insert({workspace_id:state.workspace.id,product_name,size,quantity,initial_quantity:quantity,unit_cost,origin:"Compra manual",barcode}).select().single();
     if(error)return show(msg,error.code==="23505"?"Esse código de barras já existe.":error.message,"error");
-    await supabase.from("stock_receipts").insert({workspace_id:state.workspace.id,stock_item_id:created?.id||null,product_name,size,quantity,unit_cost,received_date:today()});
-    await loadWorkspaceData();renderStock(t)};
+    const {error:receiptError}=await supabase.from("stock_receipts").insert({workspace_id:state.workspace.id,stock_item_id:created?.id||null,product_name,size,quantity,unit_cost,received_date:today()});
+    await loadWorkspaceData();renderStock(t);
+    if(receiptError)show(document.getElementById("stockMsg"),"Stock guardado, mas o histórico da compra não foi registado: "+receiptError.message,"error");
+  };
 }
 async function saveStockCorrection(item,changes,note){
   const {data,error}=await supabase.rpc("correct_stock_item",{
@@ -708,7 +836,7 @@ function orderItemTemplate(i){
   const options=stockGroups().filter(s=>Number(s.quantity)>0).map(s=>`<option value="${s.id}">${esc(s.product_name)} · ${esc(s.size||"-")} · ${s.quantity} un.</option>`).join("");
   return `<div class="order-item" data-item="${i}"><div class="order-item-title"><strong>Produto ${i+1}</strong></div><div class="grid grid-3"><label>Vai usar stock?<select data-f="useStock"><option value="yes">SIM — escolher do stock</option><option value="no">NÃO — comprado / sem stock</option></select></label><label>Quantidade<input data-f="qty" type="number" min="1" value="1"></label><label>Preço venda / unidade (€)<input data-f="sale" type="number" min="0" step="0.01" value="0"></label></div><div class="order-box" data-box="stock"><label>Escolhe o artigo<select data-f="stockId"><option value="">— escolher —</option>${options}</select></label></div><div class="order-box hidden" data-box="manual">
   <div class="grid grid-3">
-    <label>Produto<input data-f="product"></label>
+    <label class="catalog-product-field">Produto<input data-f="product" autocomplete="off" placeholder="Escreve para procurar no catálogo"><div class="catalog-suggestions" data-catalog-suggestions hidden></div></label>
     <label>Tamanho<input data-f="size"></label>
     <label>Quanto te custou / unidade (€)<input data-f="purchase" type="number" min="0" step="0.01" value="0"></label>
   </div>
@@ -721,7 +849,33 @@ function orderItemTemplate(i){
 function renderNewOrder(t){
   t.innerHTML=`${pageHead("Nova encomenda","Escolhe quantos produtos e só aparecem esses produtos")}<section class="card"><div class="grid grid-4"><label>Data<input id="oDate" type="date" value="${today()}"></label><label>Nº encomenda / referência<input id="oRef" placeholder="#1501"></label><label>Canal<select id="oChannel">${CHANNELS.map(x=>`<option>${x}</option>`).join("")}</select></label><label>Tipo de portes<select id="oShipping">${state.shipping.map(x=>`<option>${esc(x.shipping_type)}</option>`).join("")}</select></label></div><div class="grid grid-2" style="margin-top:14px"><label>Quantos produtos?<select id="oCount">${Array.from({length:10},(_,i)=>`<option value="${i+1}">${i+1}</option>`).join("")}</select></label><label>Estado<select id="oStatus">${STATUSES.map(x=>`<option>${x}</option>`).join("")}</select></label></div><hr class="sep"><div id="orderItems" class="grid"></div><hr class="sep"><div class="btn-row"><button class="btn" id="saveOrder">Guardar encomenda</button><span class="muted" id="orderPreview"></span></div><div id="orderMsg" class="notice" hidden></div></section>`;
   const box=document.getElementById("orderItems"),count=document.getElementById("oCount");
-  const draw=()=>{box.innerHTML=Array.from({length:Number(count.value)},(_,i)=>orderItemTemplate(i)).join("");box.querySelectorAll("[data-f='useStock']").forEach(sel=>sel.onchange=()=>{const row=sel.closest("[data-item]");row.querySelector("[data-box='stock']").classList.toggle("hidden",sel.value!=="yes");row.querySelector("[data-box='manual']").classList.toggle("hidden",sel.value==="yes");previewOrder()});box.querySelectorAll("input,select").forEach(x=>x.addEventListener("input",previewOrder));previewOrder()};count.onchange=draw;draw();document.getElementById("saveOrder").onclick=saveOrder;
+  const draw=()=>{box.innerHTML=Array.from({length:Number(count.value)},(_,i)=>orderItemTemplate(i)).join("");box.querySelectorAll("[data-f='useStock']").forEach(sel=>sel.onchange=()=>{const row=sel.closest("[data-item]");row.querySelector("[data-box='stock']").classList.toggle("hidden",sel.value!=="yes");row.querySelector("[data-box='manual']").classList.toggle("hidden",sel.value==="yes");previewOrder()});box.querySelectorAll("input,select").forEach(x=>x.addEventListener("input",previewOrder));bindCatalogSuggestions(box,"f");previewOrder()};count.onchange=draw;draw();document.getElementById("saveOrder").onclick=saveOrder;
+}
+function bindCatalogSuggestions(container,mode){
+  container.querySelectorAll(`[data-${mode}="product"]`).forEach(input=>{
+    if(input.readOnly||input.dataset.catalogBound)return;
+    const list=input.parentElement.querySelector("[data-catalog-suggestions]");
+    if(!list)return;
+    input.dataset.catalogBound="1";
+    const draw=()=>{
+      const matches=catalogMatches(input.value);
+      list.hidden=!matches.length;
+      list.innerHTML=matches.map(p=>`<button type="button" data-catalog-choice="${p.id}"><strong>${esc(catalogFullName(p))}</strong><span>${eur(p.default_unit_cost)} / un.</span></button>`).join("");
+    };
+    input.addEventListener("input",draw);
+    input.addEventListener("focus",draw);
+    input.addEventListener("keydown",event=>{if(event.key==="Escape")list.hidden=true});
+    list.onclick=event=>{
+      const button=event.target.closest("[data-catalog-choice]");if(!button)return;
+      const product=state.catalog.find(p=>p.id===button.dataset.catalogChoice);if(!product)return;
+      input.value=catalogFullName(product);
+      const row=input.closest("[data-item],.edit-order-item");
+      const cost=row?.querySelector(`[data-${mode}="purchase"]`);
+      if(cost)cost.value=Number(product.default_unit_cost||0).toFixed(2);
+      list.hidden=true;
+      if(mode==="f")previewOrder();
+    };
+  });
 }
 function readItems(){return [...document.querySelectorAll("[data-item]")].map(row=>{
   const use=row.querySelector("[data-f='useStock']").value==="yes";
@@ -802,9 +956,10 @@ function openSupplierTotal(){
     <div class="modal-head"><h2>Quanto falta pagar no total?</h2><span class="spacer"></span><button class="icon-btn" id="closeSupplierTotal" aria-label="Fechar">×</button></div>
     <p>Soma dos produtos por pagar: <strong>${eur(itemized)}</strong></p>
     <label>Total em dívida ao fornecedor (€)<input id="supplierTotalInput" type="number" min="0" step="0.01" value="${supplierTotalDue().toFixed(2)}"></label>
-    <p class="muted">O número que escreveres aparece no Início e nas Encomendas. Se diferir da soma dos produtos, mostramos a diferença como ajuste manual. O custo e o pagamento de cada produto não mudam.</p>
+    <p class="muted">O número que escreveres aparece no Início, em Lucros e nas Encomendas. Se diferir da soma dos produtos, mostramos a diferença como ajuste manual. Se o preço de compra estava errado, corrige o produto na encomenda para o lucro atualizar.</p>
     <div id="supplierTotalMsg" class="notice" hidden></div>
     <div class="btn-row"><button class="btn btn-light" id="resetSupplierTotal">Usar soma dos produtos</button><button class="btn" id="saveSupplierTotal">Guardar total</button></div>
+    <button class="btn btn-soft supplier-cost-link" id="goToSupplierCosts">Corrigir preço numa encomenda →</button>
   </section></div>`);
   const close=()=>document.getElementById("supplierTotalModal")?.remove();
   document.getElementById("closeSupplierTotal").onclick=close;
@@ -820,10 +975,12 @@ function openSupplierTotal(){
     state.workspace.supplier_total_adjustment=Number(data.adjustment);
     await loadWorkspaceData();close();
     if(state.page==="dashboard")renderDashboard(document.getElementById("page"));
+    else if(state.page==="profits")renderProfits(document.getElementById("page"));
     else renderOrders(document.getElementById("page"));
   };
   document.getElementById("saveSupplierTotal").onclick=()=>save(document.getElementById("supplierTotalInput").value.trim());
   document.getElementById("resetSupplierTotal").onclick=()=>save(String(itemized));
+  document.getElementById("goToSupplierCosts").onclick=()=>{close();state.ordersView="pending";go("orders")};
 }
 
 async function toggleSupplierPayment(itemId,nextPaid){
@@ -1092,7 +1249,7 @@ function editOrderItemRow(item,index,locked=false){
     </div>
     <div class="order-box ${isStock?"hidden":""}" data-edit-manual-box>
       <div class="grid grid-3">
-        <label>Produto<input data-e="product" value="${esc(item.product_name||"")}"></label>
+        <label class="catalog-product-field">Produto<input data-e="product" autocomplete="off" value="${esc(item.product_name||"")}"><div class="catalog-suggestions" data-catalog-suggestions hidden></div></label>
         <label>Tamanho<input data-e="size" value="${esc(item.size||"")}"></label>
         <label>Custo / unid. (€)<input data-e="purchase" type="number" min="0" step="0.01" value="${Number(item.purchase_price||0)}"></label>
       </div>
@@ -1105,6 +1262,7 @@ function editOrderItemRow(item,index,locked=false){
 }
 
 function bindEditOrderRows(container){
+  bindCatalogSuggestions(container,"e");
   container.querySelectorAll(".edit-order-item").forEach(row=>{
     const source=row.querySelector('[data-e="source"]');
     if(source?.tagName==="SELECT"){

@@ -9,8 +9,7 @@
 - Password antiga nunca é guardada em texto simples nem pode ser recuperada.
 - Logo pode ser alterada no cartão do utilizador.
 
-Substitui no GitHub:
-index.html, app.js, styles.css, config.js, render.yaml, README.md
+Para esta atualização, substitui no GitHub apenas `index.html`, `app.js`, `styles.css` e `README.md`.
 
 
 ## v4.1 — Dashboard por mês
@@ -104,3 +103,15 @@ Substitui `index.html`, `app.js`, `styles.css` e `README.md` na raiz do reposit�
 
 ### Publicar v8.1
 Extrai o ZIP e substitui apenas `index.html`, `app.js`, `styles.css` e `README.md` na raiz do ramo `main` de `Lucky-Urban`. Mantém `config.js` e os dados existentes. O Render publica depois do commit quando o deploy automático está ativo.
+
+## v9 — Lucros e catálogo de custos
+- A nova área **Lucros** mostra o lucro do mês, o lucro médio por dia e o progresso para a meta fixa de **1 000 €** por mês. O seletor de mês permite consultar o histórico.
+- A previsão de encomendas usa o resultado médio das últimas 30 encomendas concluídas (entregues e devolvidas). Mostra quantas encomendas podem ser necessárias no mês, quantas faltam e o ritmo diário para o mês atual. Se não houver média positiva, não inventa uma previsão.
+- O lucro mensal considera os custos dos produtos das encomendas, as despesas e as compras de stock; o custo de um produto comprado para uma encomenda conta mesmo que ainda esteja por pagar. Pagamentos ao fornecedor não voltam a subtrair esse custo.
+- Em **Catálogo → Preços guardados**, escreve o nome e o custo por unidade, por exemplo `AIR FORCE BRANCO` e `17,00 €`. Também podes alterar custos guardados. Ao escrever o nome em **Nova encomenda** ou em **Editar encomenda** para um produto comprado sem stock, escolhe a sugestão: o nome e o custo são preenchidos automaticamente. Confirma o preço de venda e os restantes dados antes de guardar.
+- Alterar o custo no catálogo afeta as próximas escolhas; encomendas antigas mantêm o custo que foi registado. Corrige uma encomenda antiga pelo botão **Editar** se o custo efetivo estava errado. Essa correção recalcula o lucro da encomenda.
+- **Editar total** da dívida ao fornecedor continua a registar o saldo em falta separadamente do lucro. Pode representar pagamentos ou acertos e não altera automaticamente os custos históricos. A janela tem um atalho para corrigir o custo real numa encomenda.
+- As entradas de stock manual e por código ficam ligadas ao respetivo movimento de compra para o lucro não contar o mesmo stock duas vezes. A migração `stock_receipt_link_v9.sql` já foi aplicada à base de dados ligada ao site; está no pacote apenas para consulta.
+
+### Publicar v9
+Na raiz do ramo `main` do repositório `Lucky-Urban`, substitui apenas `index.html`, `app.js`, `styles.css` e `README.md` pelos ficheiros deste pacote. Mantém o `config.js` atual e não executes novamente os ficheiros SQL. Aguarda o deploy do Render e atualiza a página.

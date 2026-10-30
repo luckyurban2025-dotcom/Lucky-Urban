@@ -40,6 +40,17 @@ label{display:grid;gap:6px;color:#444b56;font-size:12px;font-weight:800}input,se
 }
 
 .catalog-layout{align-items:start}
+.catalog-quick{margin-bottom:16px}
+.catalog-quick-form{display:grid;grid-template-columns:minmax(220px,1fr) 180px auto;align-items:end;gap:12px}
+.catalog-cost-list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-top:15px}
+.catalog-cost-row{display:flex;align-items:center;gap:10px;border:1px solid var(--line);border-radius:11px;padding:9px 11px;font-size:12px}
+.catalog-cost-row strong{flex:1;min-width:0;overflow-wrap:anywhere}
+.catalog-cost-row span{white-space:nowrap;color:var(--muted)}
+.catalog-product-field{position:relative}
+.catalog-suggestions{position:absolute;left:0;right:0;top:100%;z-index:20;padding:5px;background:#fff;border:1px solid #cbd1da;border-radius:11px;box-shadow:var(--shadow);max-height:245px;overflow:auto}
+.catalog-suggestions button{display:flex;align-items:center;justify-content:space-between;gap:8px;text-align:left;border:0;background:#fff;padding:9px 10px;width:100%;border-radius:8px;font-size:12px}
+.catalog-suggestions button:hover,.catalog-suggestions button:focus{background:#f0f3f7}
+.catalog-suggestions button span{color:var(--good);white-space:nowrap;font-weight:800}
 .catalog-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
 .catalog-card{border:1px solid var(--line);border-radius:16px;background:#fff;padding:13px;display:grid;gap:12px;break-inside:avoid}
 .catalog-card-top{display:flex;gap:12px;align-items:center}
@@ -65,16 +76,18 @@ label{display:grid;gap:6px;color:#444b56;font-size:12px;font-weight:800}input,se
 .entry-save-row{margin-top:15px}
 @media(max-width:900px){
   .catalog-grid{grid-template-columns:1fr}
+  .catalog-cost-list{grid-template-columns:1fr}
   .size-entry-grid{grid-template-columns:repeat(3,minmax(0,1fr))}
 }
 @media(max-width:600px){
+  .catalog-quick-form{grid-template-columns:1fr}
   .scan-product{align-items:flex-start}.scan-photo{width:92px;height:92px}
   .entry-toolbar{grid-template-columns:1fr}
   .size-entry-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
 }
 @media print{
   body{background:#fff}
-  .sidebar,.mobile-nav,.page-head,.catalog-create-panel,.catalog-card .btn-row,.month-toolbar{display:none!important}
+  .sidebar,.mobile-nav,.page-head,.catalog-create-panel,.catalog-quick,.catalog-card .btn-row,.month-toolbar{display:none!important}
   .app-shell{display:block}
   .main{padding:0}
   .catalog-layout{display:block}
@@ -122,6 +135,26 @@ label{display:grid;gap:6px;color:#444b56;font-size:12px;font-weight:800}input,se
 .supplier-balance-summary{display:flex;gap:10px;flex-wrap:wrap;margin:16px 0}
 .supplier-balance-summary span{background:#f5f6f8;border:1px solid var(--line);border-radius:9px;padding:10px;font-size:12px}
 .supplier-balance-modal .btn-row{justify-content:flex-end;margin-top:14px}
+.supplier-cost-link{margin-top:10px;width:100%}
+.profit-hero{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(220px,.8fr);gap:24px;align-items:center;margin-bottom:15px}
+.profit-hero>div{display:grid;gap:8px}
+.profit-big{font-size:clamp(34px,4vw,53px);font-weight:900;letter-spacing:-.055em;line-height:1}
+.profit-hero small,.profit-goal small{font-size:12px;color:var(--muted);line-height:1.5}
+.profit-goal{border-left:1px solid var(--line);padding-left:24px}
+.profit-goal>span{font-size:12px;color:var(--muted);font-weight:800}
+.profit-goal>strong{font-size:26px}
+.profit-progress{height:9px;background:#e9edf0;border-radius:20px;overflow:hidden}
+.profit-progress span{display:block;height:100%;background:var(--good);border-radius:20px}
+.profit-metrics{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-bottom:15px}
+.profit-metrics .soft-card{display:grid;gap:6px}
+.profit-metrics strong{font-size:23px;letter-spacing:-.035em}
+.profit-metrics small{color:var(--muted);font-size:11px;line-height:1.4}
+.profit-supplier{display:flex;align-items:center;justify-content:space-between;gap:16px}
+.profit-supplier h2{font-size:23px;letter-spacing:-.035em;margin:6px 0}
+.profit-supplier p{font-size:12px;color:var(--muted);margin:0;line-height:1.5}
+.profit-footnote{font-size:11px;color:var(--muted);line-height:1.5;margin:12px 4px}
+@media(max-width:1000px){.profit-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:600px){.profit-hero{grid-template-columns:1fr}.profit-goal{border-left:0;border-top:1px solid var(--line);padding:15px 0 0}.profit-metrics{grid-template-columns:1fr}.profit-supplier{align-items:flex-start;flex-direction:column}}
 .order-finance-line{display:flex;flex-wrap:wrap;gap:12px 18px;padding:10px 0;border-top:1px solid var(--line);border-bottom:1px solid var(--line);font-size:12px;color:var(--muted)}
 .order-actions-row{align-items:end}
 .supplier-paid-check{align-self:end;min-height:42px}
