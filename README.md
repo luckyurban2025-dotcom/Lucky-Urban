@@ -126,3 +126,12 @@ Na raiz do ramo `main` do repositório `Lucky-Urban`, substitui apenas `index.ht
 
 ### Publicar v10
 Substitui apenas `index.html`, `app.js`, `styles.css` e `README.md` na raiz do ramo `main`. Mantém `config.js` e `render.yaml` atuais. A migração da base de dados já foi aplicada e não tens de carregar SQL.
+
+## v11 — Tudo pago e apagar encomenda
+- Em **Encomendas**, o botão **Marcar tudo pago** pede confirmação e paga todos os produtos pendentes do espaço atual, incluindo dívidas de outros meses. Também coloca o ajuste manual da dívida a zero. Quando não há pendentes, aparece **✓ Tudo pago**.
+- Cada encomenda tem um botão **Apagar**. Depois de confirmares, elimina a encomenda e os seus produtos, devolve ao stock os artigos usados em encomendas em trânsito ou entregues, atualiza o lucro das outras encomendas do dia quando havia gasto Meta partilhado e guarda um registo da eliminação.
+- Se uma encomenda devolvida gerou stock que já foi usado noutra encomenda ou corrigido, a eliminação é impedida e os dados ficam como estavam. Corrige primeiro o stock e a encomenda nesse caso.
+- As funções de base de dados `pay_all_suppliers` e `delete_order_full` já foram instaladas no projeto Supabase ligado ao site. Não precisas de executar SQL.
+
+### Publicar v11
+Substitui `index.html`, `app.js`, `styles.css` e `README.md` na raiz do ramo `main` do GitHub. Mantém `config.js` e `render.yaml` atuais; o Render publica o commit.

@@ -302,6 +302,10 @@ label{display:grid;gap:6px;color:#444b56;font-size:12px;font-weight:800}input,se
 }
 
 .payables-hero{display:flex;grid-template-columns:none;justify-content:space-between;gap:20px}
+.payables-actions{margin-top:10px}
+.payables-amount .edit-supplier-total{margin-top:0}
+.paid-summary-badge{background:#eaf7ee;color:#176a35;border-color:#cde7d6;padding:9px 12px}
+.delete-order-btn{margin-left:auto}
 .order-items-details>summary,.order-finance-details>summary{cursor:pointer;font-size:12px;font-weight:800;color:#44504a;padding:8px 0}
 .order-items-details[open]>summary{margin-bottom:8px}
 .order-finance-details{border-top:1px solid var(--line)}

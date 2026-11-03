@@ -222,8 +222,8 @@ function renderDashboard(t){
       </section>
       ${can("orders")?`<section class="card home-supplier">
         <span class="eyebrow">FORNECEDOR · TODOS OS MESES</span>
-        <h2>${eur(totalUnpaid)} por pagar a fornecedores</h2>
-        <p>${pendingOrders} ${pendingOrders===1?"encomenda":"encomendas"} por pagar</p>
+        <h2>${totalUnpaid>0?`${eur(totalUnpaid)} por pagar a fornecedores`:"Tudo pago ao fornecedor"}</h2>
+        <p>${pendingOrders} ${pendingOrders===1?"encomenda":"encomendas"} com produtos por pagar</p>
         <div class="btn-row"><button class="btn btn-light" id="openPendingOrders">Ver produtos</button><button class="text-action" id="editDashboardSupplierTotal">Acertar total</button></div>
       </section>`:""}
       <section class="card home-orders">
@@ -310,7 +310,7 @@ function renderProfits(t){
       <div class="soft-card"><span class="stat-label">Encomendas para a meta do mês</span><strong>${p.ordersForMonth===null?"—":int(p.ordersForMonth)}</strong><small>${p.ordersRemaining===null?"Sem média positiva para estimar":`${p.completed.length} concluídas este mês · faltam cerca de ${int(p.ordersRemaining)}`}</small></div>
       <div class="soft-card"><span class="stat-label">Ritmo necessário</span><strong>${p.ordersPerDay===null?"—":`${int(p.ordersPerDay)} por dia`}</strong><small>${currentMonth?`${p.daysLeft} ${p.daysLeft===1?"dia":"dias"} até ao fim do mês`:"Mostrado apenas para o mês atual"}</small></div>
     </div>
-    <section class="card profit-supplier"><div><span class="eyebrow">FORNECEDOR · TODOS OS MESES</span><h2>${eur(supplierTotalDue())} por pagar</h2><p>O lucro acima já inclui o custo dos produtos, mesmo quando ainda falta pagar. ${supplierAdjustment()?`Ajuste manual no total: ${signedEur(supplierAdjustment())}.`:""}</p></div><button class="btn btn-light" id="profitsEditSupplier">Editar total</button></section>
+    <section class="card profit-supplier"><div><span class="eyebrow">FORNECEDOR · TODOS OS MESES</span><h2>${supplierTotalDue()>0?`${eur(supplierTotalDue())} por pagar`:"Tudo pago"}</h2><p>O lucro acima já inclui o custo dos produtos, mesmo quando ainda falta pagar. ${supplierAdjustment()?`Ajuste manual no total: ${signedEur(supplierAdjustment())}.`:""}</p></div><button class="btn btn-light" id="profitsEditSupplier">Editar total</button></section>
     <p class="profit-footnote">A previsão usa o lucro médio das últimas encomendas concluídas. É uma estimativa; os valores reais variam com preços, devoluções e despesas.</p>`;
   const shift=delta=>{
     const [y,m]=month.split("-").map(Number),next=new Date(y,m-1+delta,1);
@@ -1017,6 +1017,32 @@ async function toggleSupplierPayment(itemId,nextPaid){
   renderOrders(document.getElementById("page"));
 }
 
+async function markAllSuppliersPaid(){
+  const pending=state.items.filter(i=>i.source==="purchased"&&supplierDue(i)>0);
+  const due=supplierTotalDue();
+  if(!pending.length&&due<=0)return;
+  if(!confirm(`Confirmas que pagaste tudo ao fornecedor? O total de ${eur(due)} ficará a 0 € e os ${pending.length} produtos pendentes serão marcados como pagos. O ajuste manual também será limpo.`))return;
+  const button=document.getElementById("payAllSuppliers");
+  if(button)button.disabled=true;
+  const {error}=await supabase.rpc("pay_all_suppliers",{p_workspace_id:state.workspace.id});
+  if(error){if(button)button.disabled=false;return alert("Não foi possível marcar tudo pago: "+error.message)}
+  state.workspace.supplier_total_adjustment=0;
+  await loadWorkspaceData();
+  renderOrders(document.getElementById("page"));
+}
+
+async function deleteOrder(id){
+  const order=state.orders.find(o=>o.id===id);
+  if(!order)return;
+  if(!confirm(`Apagar a encomenda ${order.order_ref}? Os produtos e a dívida desta encomenda serão eliminados. Se usou stock, as unidades voltam ao stock. Esta ação não pode ser desfeita.`))return;
+  const button=[...document.querySelectorAll("[data-delete-order]")].find(b=>b.dataset.deleteOrder===id);
+  if(button)button.disabled=true;
+  const {error}=await supabase.rpc("delete_order_full",{p_order_id:id});
+  if(error){if(button)button.disabled=false;return alert("Não foi possível apagar a encomenda: "+error.message)}
+  await loadWorkspaceData();
+  renderOrders(document.getElementById("page"));
+}
+
 function openSupplierBalance(itemId){
   const item=state.items.find(i=>i.id===itemId);
   if(!item||item.source!=="purchased")return;
@@ -1060,7 +1086,7 @@ function renderOrders(t){
     ${pageHead("Encomendas","Encontra pedidos e vê o que falta pagar ao fornecedor.",can("new-order")?`<button class="btn" id="newOrderBtn">+ Nova encomenda</button>`:"")}
 
     <section class="card payables-hero" aria-label="Resumo dos pagamentos a fornecedores">
-      <div class="payables-amount"><span class="eyebrow">POR PAGAR · TODOS OS MESES</span><strong>${eur(supplierTotalDue())}</strong><small>${unpaidOrderIds.size} ${unpaidOrderIds.size===1?"encomenda":"encomendas"} · ${unpaidItems.length} ${unpaidItems.length===1?"produto":"produtos"} por pagar</small><button class="btn btn-light btn-small edit-supplier-total" id="editSupplierTotal">Editar total</button></div>
+      <div class="payables-amount"><span class="eyebrow">POR PAGAR · TODOS OS MESES</span><strong>${eur(supplierTotalDue())}</strong><small>${unpaidOrderIds.size} ${unpaidOrderIds.size===1?"encomenda":"encomendas"} · ${unpaidItems.length} ${unpaidItems.length===1?"produto":"produtos"} por pagar</small><div class="btn-row payables-actions"><button class="btn btn-light btn-small edit-supplier-total" id="editSupplierTotal">Editar total</button>${unpaidItems.length||supplierTotalDue()>0?'<button class="btn btn-success btn-small" id="payAllSuppliers">Marcar tudo pago</button>':'<span class="badge paid-summary-badge">✓ Tudo pago</span>'}</div></div>
       <details class="payables-details"><summary>Ver contas do fornecedor</summary><p>Já pago: <strong>${eur(supplierCost(allBought,true))}</strong></p><p>Soma dos produtos por pagar: <strong>${eur(itemizedUnpaid)}</strong></p>${adjustment?`<p>Ajuste manual: ${signedEur(adjustment)}</p>`:""}<small>Alterar o total em dívida não muda o lucro. Corrige o custo de compra em «Editar encomenda».</small></details>
     </section>
 
@@ -1103,6 +1129,7 @@ function renderOrders(t){
 
   document.getElementById("newOrderBtn")?.addEventListener("click",()=>go("new-order"));
   document.getElementById("editSupplierTotal")?.addEventListener("click",openSupplierTotal);
+  document.getElementById("payAllSuppliers")?.addEventListener("click",markAllSuppliersPaid);
   const monthInput=document.getElementById("ordersMonth");
   const supplierFilter=document.getElementById("supplierFilter");
   const statusFilter=document.getElementById("orderStatusFilter");
@@ -1199,12 +1226,14 @@ function renderOrders(t){
               ${allowedNext(o.status).map(s=>`<option ${s===o.status?"selected":""}>${s}</option>`).join("")}
             </select>
           </label>
+          <button class="btn btn-danger delete-order-btn" data-delete-order="${o.id}">Apagar</button>
         </div>
       </article>`;
     }).join(""):`<div class="card empty">${scope==="pending"&&!unpaidOrderIds.size?(supplierTotalDue()>0?`Não há produtos por pagar nas encomendas. O total inclui ${eur(supplierAdjustment())} de ajuste manual; usa «Editar total» para o corrigir.`:"Está tudo pago aos fornecedores. As encomendas continuam disponíveis em Por mês e Todas."):scope==="month"&&!monthOrders.length?`Não há encomendas em ${esc(monthLabel(selectedMonth))}. Escolhe outro mês ou abre Por pagar para ver pendentes de outros meses.`:"Não há encomendas com estes filtros. Limpa a pesquisa ou escolhe outro estado."}</div>`;
 
     document.querySelectorAll("[data-order-status]").forEach(s=>s.onchange=()=>changeOrderStatus(s.dataset.orderStatus,s.value));
     document.querySelectorAll("[data-edit-order]").forEach(b=>b.onclick=()=>openEditOrder(b.dataset.editOrder));
+    document.querySelectorAll("[data-delete-order]").forEach(b=>b.onclick=()=>deleteOrder(b.dataset.deleteOrder));
     document.querySelectorAll("[data-supplier-pay]").forEach(b=>b.onclick=()=>toggleSupplierPayment(b.dataset.supplierPay,b.dataset.nextPaid==="1"));
     document.querySelectorAll("[data-supplier-balance]").forEach(b=>b.onclick=()=>openSupplierBalance(b.dataset.supplierBalance));
   };
